@@ -1,0 +1,19 @@
+{
+  "name": "@jobswitch/scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@jobswitch/core": "workspace:*",
+    "@jobswitch/db": "workspace:*",
+    "@jobswitch/ingest": "workspace:*",
+    "zod": "^3.24.1"
+  }
+}

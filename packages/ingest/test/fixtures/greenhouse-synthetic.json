@@ -1,0 +1,69 @@
+{
+  "_fixture_provenance": {
+    "status": "SYNTHETIC - hand-constructed from Greenhouse's documented response shape",
+    "captured": false,
+    "why": "The build environment blocks all outbound hosts, so a real board could not be fetched. ADR D-20 requires stored real payloads; this is the honest substitute until one is captured.",
+    "replace_with": "pnpm --filter @jobswitch/ingest capture -- greenhouse <board-token>",
+    "risk": "Field names and nesting are from documentation, not observation. If Greenhouse's live shape differs, the adapter's zod schema fails loudly rather than silently mis-mapping - but that failure will surface on the first real run, not here."
+  },
+  "jobs": [
+    {
+      "id": 4001001,
+      "internal_job_id": 5001001,
+      "title": "Senior Frontend Engineer",
+      "updated_at": "2026-08-20T10:30:00-04:00",
+      "requisition_id": "ENG-114",
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/4001001",
+      "location": { "name": "Bengaluru, India" },
+      "offices": [
+        { "id": 1, "name": "Bangalore", "location": "Bengaluru, India" }
+      ],
+      "departments": [{ "id": 10, "name": "Engineering" }],
+      "metadata": [],
+      "content": "&lt;p&gt;We are looking for a &lt;strong&gt;Senior Frontend Engineer&lt;/strong&gt; to join our platform team.&lt;/p&gt;&lt;h3&gt;What you&#39;ll do&lt;/h3&gt;&lt;ul&gt;&lt;li&gt;Build product surfaces in React and TypeScript&lt;/li&gt;&lt;li&gt;Own frontend architecture for the billing domain&lt;/li&gt;&lt;/ul&gt;&lt;h3&gt;Requirements&lt;/h3&gt;&lt;ul&gt;&lt;li&gt;4+ years building production web applications&lt;/li&gt;&lt;li&gt;Strong React &amp;amp; TypeScript&lt;/li&gt;&lt;li&gt;GraphQL experience preferred&lt;/li&gt;&lt;/ul&gt;"
+    },
+    {
+      "id": 4001002,
+      "internal_job_id": 5001002,
+      "title": "Backend Engineer (Remote)",
+      "updated_at": "2026-08-22T09:00:00-04:00",
+      "requisition_id": "ENG-115",
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/4001002",
+      "location": { "name": "Remote - India" },
+      "offices": [{ "id": 2, "name": "Remote", "location": "Remote - India" }],
+      "departments": [{ "id": 10, "name": "Engineering" }],
+      "metadata": [],
+      "content": "&lt;p&gt;Join our backend team building payment infrastructure.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Go or Java&lt;/li&gt;&lt;li&gt;Postgres at scale&lt;/li&gt;&lt;/ul&gt;"
+    },
+    {
+      "id": 4001003,
+      "internal_job_id": 5001003,
+      "title": "Staff Engineer, Platform",
+      "updated_at": "2026-08-18T14:15:00-04:00",
+      "requisition_id": null,
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/4001003",
+      "location": { "name": "Hyderabad, India" },
+      "offices": [
+        { "id": 3, "name": "Hyderabad", "location": "Hyderabad, India" },
+        { "id": 1, "name": "Bangalore", "location": "Bengaluru, India" }
+      ],
+      "departments": [{ "id": 11, "name": "Infrastructure" }],
+      "metadata": [],
+      "content": "&lt;p&gt;Lead platform architecture across multiple teams.&lt;/p&gt;"
+    },
+    {
+      "id": 4001004,
+      "internal_job_id": 5001004,
+      "title": "Product Designer",
+      "updated_at": "2026-08-25T11:45:00-04:00",
+      "requisition_id": "DES-22",
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/4001004",
+      "location": { "name": "San Francisco, CA" },
+      "offices": [{ "id": 4, "name": "SF", "location": "San Francisco, CA" }],
+      "departments": [{ "id": 20, "name": "Design" }],
+      "metadata": [],
+      "content": "&lt;p&gt;Design end-to-end product experiences.&lt;/p&gt;"
+    }
+  ],
+  "meta": { "total": 4 }
+}

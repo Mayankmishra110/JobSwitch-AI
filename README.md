@@ -4,8 +4,9 @@ Job discovery from company career pages, AI matching that explains itself, and
 an application workspace that gets you from "this looks right" to "submitted"
 without retyping your life story.
 
-**Status: Phase 1 complete** — foundation, identity, tenancy and the security
-model. Job ingestion begins in Phase 2.
+**Status: Phase 2 complete** — foundation, identity and tenancy (Phase 1), plus
+the shared job index, work queue, scheduler and the first ATS adapter.
+AI matching begins in Phase 5.
 
 Design documents:
 
@@ -14,7 +15,7 @@ Design documents:
 
 ---
 
-## What Phase 1 contains
+## What is built
 
 | Area | Delivered |
 |---|---|
@@ -23,13 +24,17 @@ Design documents:
 | Tenancy | `account` / `app_user` / `account_member` — scoping on `account_id` from day one |
 | Auth | Email + password (Argon2id), sessions, password reset, Google OAuth (config-gated) |
 | Audit | Append-only, tenant-scoped, enforced by RLS policy rather than convention |
-| Tests | 45 tests against real Postgres — no mocks for the parts that matter |
+| Job index | Layer 1: companies, career sources, postings, versions, locations, groups |
+| Ingestion | Adapter contract + Greenhouse; normalization, versioning, closing |
+| Queue | Postgres-backed, `FOR UPDATE SKIP LOCKED`, retries, backoff, dead letter |
+| Processes | `web`, `worker`, `scheduler` — one image, three entrypoints |
+| Tests | 138 tests against real Postgres — no mocks for the parts that matter |
 | Ops | Dockerfile, compose, CI with a real database, health and readiness endpoints |
 
 ## Architecture in one paragraph
 
 One repository, one database, three processes (`web`, `worker`, `scheduler` —
-only `web` exists so far). Layer 1 is the shared, tenant-free job index; layers
+all three exist as of Phase 2). Layer 1 is the shared, tenant-free job index; layers
 2–4 are strictly tenant-scoped and protected by Postgres row-level security.
 Four database roles with different grants, the important one being that the
 ingestion role has **no grant at all** on tenant tables: adapters process
@@ -41,11 +46,26 @@ fully compromised.
 ```
 L0  identity      app_user, user_credential, user_session, oauth_identity
                   not tenant-scoped - authentication precedes tenancy
-L1  job index     shared, no tenant column          (Phase 2)
+L1  job index     company, career_source, job_posting, versions, groups  ← Phase 2
+                  shared, no tenant column, written only by app_ingest
 L2  personal      profiles, matches, explanations   (Phase 4-5)   RLS
 L3  application   drafts, answers, packages         (Phase 7)     RLS
-L4  career OS     audit_log, notifications          RLS  ← audit_log exists now
+L4  career OS     audit_log, notifications          RLS
 ```
+
+## Running the pipeline locally
+
+```bash
+pnpm migrate
+pnpm --filter @jobswitch/db seed      # 30 companies (tokens unverified - see below)
+
+pnpm --filter @jobswitch/scheduler dev   # enqueues due sources every minute
+pnpm --filter @jobswitch/worker dev      # claims and runs them
+```
+
+Ingestion is company-centric and shared: one fetch per company serves every
+user, so cost scales with the number of companies rather than users x companies
+(ADR D-01).
 
 ## Local development
 
@@ -100,6 +120,11 @@ data at all.
 | `pnpm test` | Everything, against real Postgres |
 | `pnpm migrate` | Apply pending migrations |
 | `pnpm migrate:status` | Show applied and pending |
+| `pnpm --filter @jobswitch/db seed` | Seed the company index |
+| `pnpm --filter @jobswitch/db seed:verify` | Probe seeded board tokens (needs network) |
+| `pnpm --filter @jobswitch/ingest capture` | Capture a real ATS payload as a fixture |
+| `pnpm --filter @jobswitch/worker dev` | Run the queue worker |
+| `pnpm --filter @jobswitch/scheduler dev` | Run the scheduler |
 
 ## Adding a migration
 
@@ -139,3 +164,31 @@ Stated plainly so nothing here reads as more finished than it is.
   database exists yet. See `docs/DEPLOYMENT.md`.
 - **Rate limiting is per-process, in memory.** Correct for one VPS; it weakens
   the moment a second web process exists.
+
+## Known gaps at the end of Phase 2
+
+- **The Greenhouse adapter has never seen a real Greenhouse response.** The
+  build environment blocks all outbound hosts, so the field mapping comes from
+  documentation and the test fixture is synthetic, not captured. ADR D-20 asks
+  for stored real payloads. Close the gap with:
+
+  ```bash
+  pnpm --filter @jobswitch/ingest capture -- greenhouse <board-token>
+  ```
+
+  then re-run the adapter tests against the captured file. The parser fails
+  loudly on an unexpected shape rather than silently returning nothing, so a
+  mismatch surfaces as a failed run and a degraded source - not as an index
+  that quietly empties.
+
+- **The 30 seeded board tokens are unverified guesses.** Company names and
+  domains are real; the tokens follow the usual slug convention and some will
+  be wrong. A wrong token 404s, fails the run, and degrades the source after
+  three attempts. Verify them with:
+
+  ```bash
+  pnpm --filter @jobswitch/db seed:verify -- --disable-failures
+  ```
+
+- **Only Greenhouse is implemented.** Lever and Ashby are Phase 3.
+- **No embeddings or matching yet.** Phase 5.

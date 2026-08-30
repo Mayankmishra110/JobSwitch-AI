@@ -21,6 +21,21 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
+  apps/scheduler:
+    dependencies:
+      '@jobswitch/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@jobswitch/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@jobswitch/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+
   apps/web:
     dependencies:
       '@fastify/cookie':
@@ -51,6 +66,21 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
 
+  apps/worker:
+    dependencies:
+      '@jobswitch/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@jobswitch/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@jobswitch/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+
   packages/core:
     dependencies:
       zod:
@@ -69,6 +99,18 @@ importers:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.23.1
+
+  packages/ingest:
+    dependencies:
+      '@jobswitch/core':
+        specifier: workspace:*
+        version: link:../core
+      '@jobswitch/db':
+        specifier: workspace:*
+        version: link:../db
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
 
 packages:
 
