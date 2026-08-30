@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: jobswitch
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: jobswitch_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U jobswitch"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL_TEST: postgres://jobswitch:devpassword@127.0.0.1:5432/jobswitch_test
+      DATABASE_URL_TEST_WEB: postgres://app_web_test:webpassword@127.0.0.1:5432/jobswitch_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      - run: pnpm typecheck
+
+      # Runs the RLS suite, which is the reason CI needs a real Postgres
+      # rather than a stub: tenant isolation cannot be verified against a mock.
+      - run: pnpm test

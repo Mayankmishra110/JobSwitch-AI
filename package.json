@@ -1,0 +1,25 @@
+{
+  "name": "jobswitch-ai",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/**\" run build && pnpm --filter @jobswitch/web run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "dev": "pnpm --filter @jobswitch/web run dev",
+    "migrate": "pnpm --filter @jobswitch/db run migrate",
+    "migrate:status": "pnpm --filter @jobswitch/db run migrate:status",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
