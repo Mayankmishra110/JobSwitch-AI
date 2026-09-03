@@ -1,13 +1,15 @@
 import type { AtsAdapter } from './adapter.js';
 import { greenhouseAdapter } from './adapters/greenhouse.js';
+import { leverAdapter } from './adapters/lever.js';
+import { ashbyAdapter } from './adapters/ashby.js';
 
 /**
  * The adapter registry.
  *
- * Adding an ATS is one file plus one line here (ADR D-01). Lever and Ashby
- * land in Phase 3; SmartRecruiters, Workable and Workday in V1.
+ * Adding an ATS is one file plus one line here (ADR D-01). SmartRecruiters,
+ * Workable and Workday land in V1.
  */
-const ADAPTERS: AtsAdapter[] = [greenhouseAdapter];
+const ADAPTERS: AtsAdapter[] = [greenhouseAdapter, leverAdapter, ashbyAdapter];
 
 const BY_TYPE = new Map(ADAPTERS.map((a) => [a.atsType, a]));
 

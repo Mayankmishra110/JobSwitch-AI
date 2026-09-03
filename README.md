@@ -4,9 +4,9 @@ Job discovery from company career pages, AI matching that explains itself, and
 an application workspace that gets you from "this looks right" to "submitted"
 without retyping your life story.
 
-**Status: Phase 2 complete** — foundation, identity and tenancy (Phase 1), plus
-the shared job index, work queue, scheduler and the first ATS adapter.
-AI matching begins in Phase 5.
+**Status: Phase 3 complete** — foundation, identity and tenancy (Phase 1), the
+shared job index, work queue and scheduler (Phase 2), plus Lever and Ashby
+adapters alongside Greenhouse. AI matching begins in Phase 5.
 
 Design documents:
 
@@ -25,10 +25,10 @@ Design documents:
 | Auth | Email + password (Argon2id), sessions, password reset, Google OAuth (config-gated) |
 | Audit | Append-only, tenant-scoped, enforced by RLS policy rather than convention |
 | Job index | Layer 1: companies, career sources, postings, versions, locations, groups |
-| Ingestion | Adapter contract + Greenhouse; normalization, versioning, closing |
+| Ingestion | Adapter contract + Greenhouse, Lever, Ashby; normalization, versioning, closing |
 | Queue | Postgres-backed, `FOR UPDATE SKIP LOCKED`, retries, backoff, dead letter |
 | Processes | `web`, `worker`, `scheduler` — one image, three entrypoints |
-| Tests | 138 tests against real Postgres — no mocks for the parts that matter |
+| Tests | 193 tests against real Postgres — no mocks for the parts that matter |
 | Ops | Dockerfile, compose, CI with a real database, health and readiness endpoints |
 
 ## Architecture in one paragraph
@@ -165,30 +165,38 @@ Stated plainly so nothing here reads as more finished than it is.
 - **Rate limiting is per-process, in memory.** Correct for one VPS; it weakens
   the moment a second web process exists.
 
-## Known gaps at the end of Phase 2
+## Known gaps at the end of Phase 3
 
-- **The Greenhouse adapter has never seen a real Greenhouse response.** The
-  build environment blocks all outbound hosts, so the field mapping comes from
-  documentation and the test fixture is synthetic, not captured. ADR D-20 asks
-  for stored real payloads. Close the gap with:
+- **None of the three adapters has ever seen a real response.** The build
+  environment blocks all outbound hosts, so every field mapping comes from
+  documentation and every test fixture is synthetic, not captured. ADR D-20
+  asks for stored real payloads. Close the gap per adapter with:
 
   ```bash
   pnpm --filter @jobswitch/ingest capture -- greenhouse <board-token>
+  pnpm --filter @jobswitch/ingest capture -- lever <site-token>
+  pnpm --filter @jobswitch/ingest capture -- ashby <board-name>
   ```
 
-  then re-run the adapter tests against the captured file. The parser fails
+  then re-run the adapter tests against the captured file. Each parser fails
   loudly on an unexpected shape rather than silently returning nothing, so a
   mismatch surfaces as a failed run and a degraded source - not as an index
   that quietly empties.
 
-- **The 30 seeded board tokens are unverified guesses.** Company names and
-  domains are real; the tokens follow the usual slug convention and some will
-  be wrong. A wrong token 404s, fails the run, and degrades the source after
-  three attempts. Verify them with:
+- **The 40 seeded board tokens are unverified guesses.** Company names and
+  domains are real; the tokens follow each platform's usual slug convention
+  and some will be wrong. A wrong token 404s, fails the run, and degrades the
+  source after three attempts. Verify them with:
 
   ```bash
   pnpm --filter @jobswitch/db seed:verify -- --disable-failures
   ```
 
-- **Only Greenhouse is implemented.** Lever and Ashby are Phase 3.
+- **Ashby's compensation mapping is a documentation guess.** `includeCompensation=true`
+  is assumed to return a `summaryComponents` array on `compensation`, of which
+  only the first tier is read. A board with no compensation configured
+  correctly yields `salaryMin/Max: null`; if real data nests the field
+  differently, the schema fails loudly like everywhere else - worth watching
+  for specifically once a real board is captured.
+- **SmartRecruiters, Workable and Workday are V1.**
 - **No embeddings or matching yet.** Phase 5.

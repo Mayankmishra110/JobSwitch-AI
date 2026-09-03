@@ -1,0 +1,64 @@
+{
+  "_fixture_provenance": {
+    "status": "SYNTHETIC - hand-constructed from Ashby's documented response shape",
+    "captured": false,
+    "why": "The build environment blocks all outbound hosts, so a real board could not be fetched. ADR D-20 requires stored real payloads; this is the honest substitute until one is captured.",
+    "replace_with": "pnpm --filter @jobswitch/ingest capture -- ashby <board-name>",
+    "risk": "Field names and nesting are from documentation, not observation. If Ashby's live shape differs, the adapter's zod schema fails loudly rather than silently mis-mapping - but that failure will surface on the first real run, not here."
+  },
+  "jobs": [
+    {
+      "id": "b2c3d4e5-0001-4f5a-9b1c-000000000001",
+      "title": "Senior Data Engineer",
+      "jobUrl": "https://jobs.ashbyhq.com/examplecorp/b2c3d4e5-0001-4f5a-9b1c-000000000001",
+      "applyUrl": "https://jobs.ashbyhq.com/examplecorp/b2c3d4e5-0001-4f5a-9b1c-000000000001/application",
+      "department": "Engineering",
+      "team": "Data Platform",
+      "employmentType": "FullTime",
+      "location": "Bengaluru, India",
+      "isRemote": false,
+      "descriptionHtml": "<p>We're looking for a <strong>Senior Data Engineer</strong> to build our analytics pipeline.</p>",
+      "descriptionPlain": "We're looking for a Senior Data Engineer to build our analytics pipeline.\n\nRequirements:\n- 5+ years data engineering experience\n- Strong SQL and Python\n- Experience with Airflow or similar",
+      "publishedAt": "2026-08-18T09:00:00.000Z",
+      "updatedAt": "2026-08-20T10:30:00.000Z",
+      "compensation": {
+        "summaryComponents": [
+          { "minValue": 2500000, "maxValue": 4000000, "currencyCode": "INR" }
+        ]
+      }
+    },
+    {
+      "id": "b2c3d4e5-0002-4f5a-9b1c-000000000002",
+      "title": "Engineering Manager (Remote)",
+      "jobUrl": "https://jobs.ashbyhq.com/examplecorp/b2c3d4e5-0002-4f5a-9b1c-000000000002",
+      "department": "Engineering",
+      "team": "Platform",
+      "employmentType": "FullTime",
+      "isRemote": true,
+      "descriptionPlain": "Lead our platform engineering team of eight.",
+      "publishedAt": "2026-08-19T09:00:00.000Z"
+    },
+    {
+      "id": "b2c3d4e5-0003-4f5a-9b1c-000000000003",
+      "title": "Staff Engineer, Search",
+      "jobUrl": "https://jobs.ashbyhq.com/examplecorp/b2c3d4e5-0003-4f5a-9b1c-000000000003",
+      "department": "Engineering",
+      "employmentType": "FullTime",
+      "location": "Hyderabad, India",
+      "secondaryLocations": [{ "location": "Bengaluru, India" }],
+      "isRemote": false,
+      "descriptionHtml": "<p>Own search relevance across the product.</p>",
+      "publishedAt": "2026-08-17T09:00:00.000Z"
+    },
+    {
+      "id": "b2c3d4e5-0004-4f5a-9b1c-000000000004",
+      "title": "Executive Assistant",
+      "jobUrl": "https://jobs.ashbyhq.com/examplecorp/b2c3d4e5-0004-4f5a-9b1c-000000000004",
+      "department": "Operations",
+      "employmentType": "FullTime",
+      "location": "San Francisco, CA",
+      "isRemote": false,
+      "publishedAt": "2026-08-16T09:00:00.000Z"
+    }
+  ]
+}

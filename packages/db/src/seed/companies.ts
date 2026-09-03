@@ -6,8 +6,8 @@
  *
  * The build environment blocks outbound network access, so none of these could
  * be checked against a live board. Company names and domains are real; the
- * Greenhouse board tokens are best guesses from the usual slug convention and
- * SOME WILL BE WRONG.
+ * board tokens (Greenhouse, Lever, Ashby) are best guesses from the usual
+ * slug convention and SOME WILL BE WRONG.
  *
  * A wrong token is not silent: the adapter raises AdapterHttpError 404, the
  * run is recorded as a failure, and the source is marked `degraded` after
@@ -29,7 +29,7 @@ export interface SeedCompany {
   name: string;
   domain: string;
   website: string;
-  atsType: 'greenhouse';
+  atsType: 'greenhouse' | 'lever' | 'ashby';
   boardIdentifier: string;
   cadenceTier?: 'hot' | 'standard' | 'cold';
 }
@@ -65,6 +65,20 @@ export const SEED_COMPANIES: SeedCompany[] = [
   { name: 'Airbnb', domain: 'airbnb.com', website: 'https://www.airbnb.com', atsType: 'greenhouse', boardIdentifier: 'airbnb' },
   { name: 'Coinbase', domain: 'coinbase.com', website: 'https://www.coinbase.com', atsType: 'greenhouse', boardIdentifier: 'coinbase' },
   { name: 'Twilio', domain: 'twilio.com', website: 'https://www.twilio.com', atsType: 'greenhouse', boardIdentifier: 'twilio' },
+
+  // Lever boards (Phase 3).
+  { name: 'Netflix', domain: 'netflix.com', website: 'https://www.netflix.com', atsType: 'lever', boardIdentifier: 'netflix' },
+  { name: 'Reddit', domain: 'reddit.com', website: 'https://www.reddit.com', atsType: 'lever', boardIdentifier: 'reddit' },
+  { name: 'Plaid', domain: 'plaid.com', website: 'https://plaid.com', atsType: 'lever', boardIdentifier: 'plaid' },
+  { name: 'Robinhood', domain: 'robinhood.com', website: 'https://robinhood.com', atsType: 'lever', boardIdentifier: 'robinhood' },
+  { name: 'Attentive', domain: 'attentive.com', website: 'https://www.attentive.com', atsType: 'lever', boardIdentifier: 'attentive' },
+
+  // Ashby boards (Phase 3).
+  { name: 'Ramp', domain: 'ramp.com', website: 'https://ramp.com', atsType: 'ashby', boardIdentifier: 'ramp' },
+  { name: 'Linear', domain: 'linear.app', website: 'https://linear.app', atsType: 'ashby', boardIdentifier: 'linear' },
+  { name: 'Retool', domain: 'retool.com', website: 'https://retool.com', atsType: 'ashby', boardIdentifier: 'retool' },
+  { name: 'Substack', domain: 'substack.com', website: 'https://substack.com', atsType: 'ashby', boardIdentifier: 'substack' },
+  { name: 'Watershed', domain: 'watershed.com', website: 'https://watershed.com', atsType: 'ashby', boardIdentifier: 'watershed' },
 ];
 
 /**

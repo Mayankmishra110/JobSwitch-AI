@@ -1,0 +1,79 @@
+{
+  "_fixture_provenance": {
+    "status": "SYNTHETIC - hand-constructed from Lever's documented response shape",
+    "captured": false,
+    "why": "The build environment blocks all outbound hosts, so a real board could not be fetched. ADR D-20 requires stored real payloads; this is the honest substitute until one is captured.",
+    "replace_with": "pnpm --filter @jobswitch/ingest capture -- lever <site-token>",
+    "risk": "Field names and nesting are from documentation, not observation. If Lever's live shape differs, the adapter's zod schema fails loudly rather than silently mis-mapping - but that failure will surface on the first real run, not here."
+  },
+  "jobs": [
+    {
+      "id": "9a1f2b3c-0001-4a2b-8c3d-000000000001",
+      "text": "Senior Backend Engineer",
+      "hostedUrl": "https://jobs.lever.co/examplecorp/9a1f2b3c-0001-4a2b-8c3d-000000000001",
+      "applyUrl": "https://jobs.lever.co/examplecorp/9a1f2b3c-0001-4a2b-8c3d-000000000001/apply",
+      "createdAt": 1755700000000,
+      "workplaceType": "on-site",
+      "country": "IN",
+      "categories": {
+        "team": "Platform",
+        "department": "Engineering",
+        "location": "Bengaluru, India",
+        "allLocations": ["Bengaluru, India"],
+        "commitment": "Full-time"
+      },
+      "content": {
+        "description": "<p>We're looking for a <strong>Senior Backend Engineer</strong> to own our payments platform.</p>",
+        "lists": [
+          { "text": "Requirements", "content": "<ul><li>5+ years backend experience</li><li>Strong Go or Java</li><li>Postgres at scale</li></ul>" }
+        ],
+        "closing": "<p>We are an equal opportunity employer.</p>"
+      }
+    },
+    {
+      "id": "9a1f2b3c-0002-4a2b-8c3d-000000000002",
+      "text": "Product Manager (Remote)",
+      "hostedUrl": "https://jobs.lever.co/examplecorp/9a1f2b3c-0002-4a2b-8c3d-000000000002",
+      "applyUrl": "https://jobs.lever.co/examplecorp/9a1f2b3c-0002-4a2b-8c3d-000000000002/apply",
+      "createdAt": 1755800000000,
+      "workplaceType": "remote",
+      "country": "IN",
+      "categories": {
+        "team": "Product",
+        "department": "Product",
+        "commitment": "Full-time"
+      },
+      "content": {
+        "description": "<p>Own the roadmap for our merchant onboarding flow.</p>"
+      }
+    },
+    {
+      "id": "9a1f2b3c-0003-4a2b-8c3d-000000000003",
+      "text": "Staff Engineer, Infrastructure",
+      "hostedUrl": "https://jobs.lever.co/examplecorp/9a1f2b3c-0003-4a2b-8c3d-000000000003",
+      "createdAt": 1755600000000,
+      "workplaceType": "on-site",
+      "categories": {
+        "team": "Infrastructure",
+        "location": "Hyderabad, India",
+        "allLocations": ["Hyderabad, India", "Bengaluru, India"],
+        "commitment": "Full-time"
+      },
+      "content": {
+        "descriptionHtml": "<p>Lead infrastructure architecture across multiple teams.</p>"
+      }
+    },
+    {
+      "id": "9a1f2b3c-0004-4a2b-8c3d-000000000004",
+      "text": "Recruiting Coordinator",
+      "hostedUrl": "https://jobs.lever.co/examplecorp/9a1f2b3c-0004-4a2b-8c3d-000000000004",
+      "createdAt": 1755500000000,
+      "workplaceType": "on-site",
+      "categories": {
+        "team": "People",
+        "location": "San Francisco, CA",
+        "commitment": "Full-time"
+      }
+    }
+  ]
+}
