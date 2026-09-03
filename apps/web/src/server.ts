@@ -12,6 +12,7 @@ import { resolveSession } from './services/auth.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerAppRoutes } from './routes/app.js';
+import { registerProfileRoutes } from './routes/profile.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -180,6 +181,7 @@ export async function buildServer(
   await registerHealthRoutes(app);
   await registerAuthRoutes(app);
   await registerAppRoutes(app);
+  await registerProfileRoutes(app);
 
   // Close the pool with the server, but only if we created it - a pool passed
   // in by a test is that test's to manage.

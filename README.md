@@ -4,9 +4,11 @@ Job discovery from company career pages, AI matching that explains itself, and
 an application workspace that gets you from "this looks right" to "submitted"
 without retyping your life story.
 
-**Status: Phase 3 complete** — foundation, identity and tenancy (Phase 1), the
-shared job index, work queue and scheduler (Phase 2), plus Lever and Ashby
-adapters alongside Greenhouse. AI matching begins in Phase 5.
+**Status: Phase 4 complete** — foundation, identity and tenancy (Phase 1), the
+shared job index, work queue and scheduler (Phase 2), Lever and Ashby adapters
+alongside Greenhouse (Phase 3), plus the personal profile layer: candidate
+profile, skills and work history, RLS-protected from the first row. AI
+matching and explanations begin in Phase 5.
 
 Design documents:
 
@@ -27,8 +29,9 @@ Design documents:
 | Job index | Layer 1: companies, career sources, postings, versions, locations, groups |
 | Ingestion | Adapter contract + Greenhouse, Lever, Ashby; normalization, versioning, closing |
 | Queue | Postgres-backed, `FOR UPDATE SKIP LOCKED`, retries, backoff, dead letter |
+| Personal profile | Layer 2: candidate profile, skills, work history — the first tenant-owned data, RLS from row one |
 | Processes | `web`, `worker`, `scheduler` — one image, three entrypoints |
-| Tests | 193 tests against real Postgres — no mocks for the parts that matter |
+| Tests | 223 tests against real Postgres — no mocks for the parts that matter |
 | Ops | Dockerfile, compose, CI with a real database, health and readiness endpoints |
 
 ## Architecture in one paragraph
@@ -48,7 +51,8 @@ L0  identity      app_user, user_credential, user_session, oauth_identity
                   not tenant-scoped - authentication precedes tenancy
 L1  job index     company, career_source, job_posting, versions, groups  ← Phase 2
                   shared, no tenant column, written only by app_ingest
-L2  personal      profiles, matches, explanations   (Phase 4-5)   RLS
+L2  personal      candidate_profile, profile_skill,                ← Phase 4
+                  profile_experience, matches, explanations (Phase 5)   RLS
 L3  application   drafts, answers, packages         (Phase 7)     RLS
 L4  career OS     audit_log, notifications          RLS
 ```
@@ -137,6 +141,21 @@ column, `ENABLE ROW LEVEL SECURITY`, a policy for `SELECT` **and** a
 `WITH CHECK` policy for `INSERT`, then grants. Omitting the `WITH CHECK` half
 protects reads while leaving writes open, which is the easy mistake.
 
+## Personal profile API (Phase 4)
+
+All routes require a session (`preHandler: app.requireAuth`) and are scoped to
+`request.principal.accountId` inside `withAccount` - never to anything in the
+request body or URL.
+
+| Route | Does |
+|---|---|
+| `GET /api/v1/profile` | Returns `{ profile, skills, experience }` for the caller's account |
+| `PUT /api/v1/profile` | Upserts core fields. A field omitted from the body keeps its current value - there is no way yet to blank one out once set (see known gaps) |
+| `PUT /api/v1/profile/skills` | Replaces the whole skill list; case-insensitive de-dup |
+| `POST /api/v1/profile/experience` | Adds one work-history entry |
+| `PATCH /api/v1/profile/experience/:id` | Updates the fields sent; marking `isCurrent: true` clears `endDate` unless the caller also sends one explicitly |
+| `DELETE /api/v1/profile/experience/:id` | Removes one entry; 404 (not 500) for a malformed or absent id |
+
 ## Health endpoints
 
 - `GET /healthz` — liveness. Touches nothing, so a database blip does not get a
@@ -200,3 +219,30 @@ Stated plainly so nothing here reads as more finished than it is.
   for specifically once a real board is captured.
 - **SmartRecruiters, Workable and Workday are V1.**
 - **No embeddings or matching yet.** Phase 5.
+
+## Known gaps at the end of Phase 4
+
+- **No way to clear a field once set.** `upsertProfile` and `PATCH .../experience/:id`
+  treat an omitted field as "leave it alone," which means there is currently
+  no request that blanks out a `headline` or a `summary` once written. A
+  future `PATCH` with explicit-null semantics (distinct from "not sent")
+  closes this; it did not seem worth the complexity for a Phase 4 profile
+  form that is realistically always sending the field it wants changed.
+- **Resumes are text-only.** `candidate_profile.resume_text` and
+  `resume_filename` exist; the actual uploaded file is not retained anywhere,
+  because no object store is wired up yet. There is also no PDF/DOCX text
+  extraction - `setResume` takes already-extracted text as input, and nothing
+  in this repo produces that text yet. Whatever calls it next (a Phase 5
+  upload endpoint) owns that extraction step.
+- **No profile UI.** Phase 4 is the API surface only, consistent with Phases
+  2-3 - the dashboard rebuild is Phase 6, per the architecture note that a
+  static frontend arrives once there is one worth building.
+- **`upsertProfile`'s read-then-write is not race-free.** Two concurrent `PUT`
+  requests on the same account can each read before the other writes and one
+  update can clobber fields the other just set. Acceptable for a single
+  user's own profile edited from, realistically, one browser tab at a time -
+  unlike the job queue, which is why that path uses `FOR UPDATE SKIP LOCKED`
+  and this one does not.
+- **`profile_skill` and `profile_experience` are not readable by `app_matcher`
+  yet.** Phase 5 grants that access deliberately, table by table, rather than
+  the matcher inheriting broad read rights by default.
