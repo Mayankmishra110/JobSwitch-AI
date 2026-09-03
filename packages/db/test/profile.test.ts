@@ -197,21 +197,6 @@ describe('profile repository behaviour', () => {
     expect(updated.desiredLocations).toEqual(['Bengaluru', 'Remote']);
   });
 
-  it('setResume updates only the resume fields', async () => {
-    await withAccount(webPool, accountA, (tx) =>
-      profileRepo.upsertProfile(tx, accountA, { headline: 'Keep me' }),
-    );
-
-    const withResume = await withAccount(webPool, accountA, (tx) =>
-      profileRepo.setResume(tx, accountA, { filename: 'resume.pdf', text: 'Experienced engineer.' }),
-    );
-
-    expect(withResume.resumeFilename).toBe('resume.pdf');
-    expect(withResume.resumeText).toBe('Experienced engineer.');
-    expect(withResume.resumeUploadedAt).not.toBeNull();
-    expect(withResume.headline).toBe('Keep me');
-  });
-
   it('replaceSkills de-duplicates case-insensitively, keeping the first spelling', async () => {
     const skills = await withAccount(webPool, accountA, (tx) =>
       profileRepo.replaceSkills(tx, accountA, ['React', 'react', 'TypeScript']),

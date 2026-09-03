@@ -2,6 +2,7 @@ import {
   AccountId,
   type CandidateProfile,
   type ExperienceInput,
+  type FactProvenance,
   type ProfileExperience,
   type ProfileSkill,
   type UpsertProfileInput,
@@ -25,18 +26,19 @@ import type { Queryable } from '../context.js';
 interface ProfileRow {
   account_id: string;
   headline: string | null;
+  headline_provenance: FactProvenance;
   summary: string | null;
+  summary_provenance: FactProvenance;
   current_title: string | null;
+  current_title_provenance: FactProvenance;
   years_experience: number | null;
+  years_experience_provenance: FactProvenance;
   desired_titles: string[];
   desired_locations: string[];
   desired_work_mode: WorkModePreference | null;
   desired_salary_min: number | null;
   desired_salary_max: number | null;
   desired_salary_currency: string | null;
-  resume_filename: string | null;
-  resume_text: string | null;
-  resume_uploaded_at: Date | null;
   linkedin_url: string | null;
   github_url: string | null;
   portfolio_url: string | null;
@@ -44,28 +46,29 @@ interface ProfileRow {
   updated_at: Date;
 }
 
-const PROFILE_COLUMNS = `account_id, headline, summary, current_title, years_experience,
+const PROFILE_COLUMNS = `account_id, headline, headline_provenance, summary, summary_provenance,
+  current_title, current_title_provenance, years_experience, years_experience_provenance,
   desired_titles, desired_locations, desired_work_mode,
   desired_salary_min, desired_salary_max, desired_salary_currency,
-  resume_filename, resume_text, resume_uploaded_at,
   linkedin_url, github_url, portfolio_url, created_at, updated_at`;
 
 function toProfile(row: ProfileRow): CandidateProfile {
   return {
     accountId: AccountId(row.account_id),
     headline: row.headline,
+    headlineProvenance: row.headline_provenance,
     summary: row.summary,
+    summaryProvenance: row.summary_provenance,
     currentTitle: row.current_title,
+    currentTitleProvenance: row.current_title_provenance,
     yearsExperience: row.years_experience,
+    yearsExperienceProvenance: row.years_experience_provenance,
     desiredTitles: row.desired_titles,
     desiredLocations: row.desired_locations,
     desiredWorkMode: row.desired_work_mode,
     desiredSalaryMin: row.desired_salary_min,
     desiredSalaryMax: row.desired_salary_max,
     desiredSalaryCurrency: row.desired_salary_currency,
-    resumeFilename: row.resume_filename,
-    resumeText: row.resume_text,
-    resumeUploadedAt: row.resume_uploaded_at,
     linkedinUrl: row.linkedin_url,
     githubUrl: row.github_url,
     portfolioUrl: row.portfolio_url,
@@ -91,7 +94,8 @@ export async function getProfile(
  * A field omitted from `input` keeps its current value rather than being
  * cleared - there is no way yet to blank out a headline once set, which is a
  * deliberate MVP simplification (see the README's known gaps), not an
- * oversight. Resume fields are untouched here; `setResume` owns those.
+ * oversight. The resume itself is not a candidate_profile field at all -
+ * see the jobSearch repository's `resume_upload` (ADR D-31).
  *
  * Reads the existing row before writing rather than a partial `SET` list, so
  * the statement is one deterministic INSERT ... ON CONFLICT regardless of
@@ -189,34 +193,6 @@ export async function upsertProfile(
   return toProfile(row);
 }
 
-/**
- * Record an uploaded resume's extracted text.
- *
- * Text-only: there is no object store wired up yet (README known gaps), so
- * the original file is not retained anywhere - only what was extracted from
- * it, which is also all Phase 5 embedding will ever need to read.
- */
-export async function setResume(
-  tx: Queryable,
-  accountId: AccountId,
-  params: { filename: string; text: string },
-): Promise<CandidateProfile> {
-  const { rows } = await tx.query<ProfileRow>(
-    `INSERT INTO candidate_profile (account_id, resume_filename, resume_text, resume_uploaded_at)
-     VALUES ($1, $2, $3, now())
-     ON CONFLICT (account_id) DO UPDATE SET
-       resume_filename = EXCLUDED.resume_filename,
-       resume_text = EXCLUDED.resume_text,
-       resume_uploaded_at = EXCLUDED.resume_uploaded_at,
-       updated_at = now()
-     RETURNING ${PROFILE_COLUMNS}`,
-    [accountId, params.filename, params.text],
-  );
-  const row = rows[0];
-  if (!row) throw new Error('candidate_profile resume upsert returned no row');
-  return toProfile(row);
-}
-
 // ---------------------------------------------------------------------------
 // profile_skill
 // ---------------------------------------------------------------------------
@@ -225,14 +201,22 @@ interface SkillRow {
   id: string;
   account_id: string;
   skill: string;
+  provenance: FactProvenance;
+  evidence_ref: string | null;
+  confidence: number | null;
   created_at: Date;
 }
+
+const SKILL_COLUMNS = 'id, account_id, skill, provenance, evidence_ref, confidence, created_at';
 
 function toSkill(row: SkillRow): ProfileSkill {
   return {
     id: row.id,
     accountId: AccountId(row.account_id),
     skill: row.skill,
+    provenance: row.provenance,
+    evidenceRef: row.evidence_ref,
+    confidence: row.confidence,
     createdAt: row.created_at,
   };
 }
@@ -242,7 +226,7 @@ export async function listSkills(
   accountId: AccountId,
 ): Promise<ProfileSkill[]> {
   const { rows } = await tx.query<SkillRow>(
-    `SELECT id, account_id, skill, created_at FROM profile_skill
+    `SELECT ${SKILL_COLUMNS} FROM profile_skill
      WHERE account_id = $1 ORDER BY lower(skill)`,
     [accountId],
   );
@@ -279,7 +263,7 @@ export async function replaceSkills(
   const values = deduped.map((_, i) => `($1, $${i + 2})`).join(', ');
   const { rows } = await tx.query<SkillRow>(
     `INSERT INTO profile_skill (account_id, skill) VALUES ${values}
-     RETURNING id, account_id, skill, created_at`,
+     RETURNING ${SKILL_COLUMNS}`,
     [accountId, ...deduped],
   );
   return rows.map(toSkill).sort((a, b) => a.skill.localeCompare(b.skill));
@@ -299,9 +283,14 @@ interface ExperienceRow {
   end_date: string | null;
   is_current: boolean;
   description: string | null;
+  provenance: FactProvenance;
+  evidence_ref: string | null;
   created_at: Date;
   updated_at: Date;
 }
+
+const EXPERIENCE_COLUMNS = `id, account_id, company, title, location, start_date, end_date,
+  is_current, description, provenance, evidence_ref, created_at, updated_at`;
 
 function toExperience(row: ExperienceRow): ProfileExperience {
   return {
@@ -314,6 +303,8 @@ function toExperience(row: ExperienceRow): ProfileExperience {
     endDate: row.end_date,
     isCurrent: row.is_current,
     description: row.description,
+    provenance: row.provenance,
+    evidenceRef: row.evidence_ref,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -324,8 +315,7 @@ export async function listExperience(
   accountId: AccountId,
 ): Promise<ProfileExperience[]> {
   const { rows } = await tx.query<ExperienceRow>(
-    `SELECT id, account_id, company, title, location, start_date, end_date,
-            is_current, description, created_at, updated_at
+    `SELECT ${EXPERIENCE_COLUMNS}
      FROM profile_experience
      WHERE account_id = $1
      ORDER BY is_current DESC, start_date DESC`,
@@ -340,8 +330,7 @@ export async function getExperienceById(
   experienceId: string,
 ): Promise<ProfileExperience | null> {
   const { rows } = await tx.query<ExperienceRow>(
-    `SELECT id, account_id, company, title, location, start_date, end_date,
-            is_current, description, created_at, updated_at
+    `SELECT ${EXPERIENCE_COLUMNS}
      FROM profile_experience
      WHERE account_id = $1 AND id = $2`,
     [accountId, experienceId],
@@ -358,8 +347,7 @@ export async function addExperience(
     `INSERT INTO profile_experience
        (account_id, company, title, location, start_date, end_date, is_current, description)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     RETURNING id, account_id, company, title, location, start_date, end_date,
-               is_current, description, created_at, updated_at`,
+     RETURNING ${EXPERIENCE_COLUMNS}`,
     [
       accountId,
       input.company,
@@ -395,8 +383,7 @@ export async function updateExperience(
      SET company = $3, title = $4, location = $5, start_date = $6,
          end_date = $7, is_current = $8, description = $9, updated_at = now()
      WHERE account_id = $1 AND id = $2
-     RETURNING id, account_id, company, title, location, start_date, end_date,
-               is_current, description, created_at, updated_at`,
+     RETURNING ${EXPERIENCE_COLUMNS}`,
     [
       accountId,
       experienceId,

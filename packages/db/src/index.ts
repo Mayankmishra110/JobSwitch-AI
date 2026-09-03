@@ -7,6 +7,7 @@ export * as auditRepo from './repositories/audit.js';
 export * as queueRepo from './repositories/queue.js';
 export * as jobsRepo from './repositories/jobs.js';
 export * as profileRepo from './repositories/profile.js';
+export * as jobSearchRepo from './repositories/jobSearch.js';
 export type { QueueJob, EnqueueParams, QueueDepth } from './repositories/queue.js';
 export type {
   CareerSourceRow,

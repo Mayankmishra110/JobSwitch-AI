@@ -13,21 +13,47 @@ import type { AccountId } from './ids.js';
 
 export type WorkModePreference = 'remote' | 'hybrid' | 'onsite' | 'any';
 
+/**
+ * Fact provenance (ADR D-22/D-22a).
+ *
+ * Every fact in a candidate's profile is exactly one of these five kinds,
+ * and the system must always know which. A match explanation or a tailored
+ * resume edit that cites a fact has to be able to say whether that fact was
+ * verified, self-reported, a search preference, model-inferred, or
+ * model-written prose - because "matched on 4 years Python (verified from
+ * your resume)" and "matched on 4 years Python (the model guessed)" are not
+ * the same claim, and this product's premise is that the difference matters.
+ *
+ * `selfAsserted` was added after the original four (verifiedFact,
+ * preference, aiInference, generatedText): a hand-typed headline is neither
+ * "extracted from a document" nor "a search criterion" - it needed its own
+ * name (D-22a).
+ */
+export type FactProvenance =
+  | 'verified_fact'
+  | 'self_asserted'
+  | 'preference'
+  | 'ai_inference'
+  | 'generated_text';
+
 export interface CandidateProfile {
   accountId: AccountId;
   headline: string | null;
+  headlineProvenance: FactProvenance;
   summary: string | null;
+  summaryProvenance: FactProvenance;
   currentTitle: string | null;
+  currentTitleProvenance: FactProvenance;
   yearsExperience: number | null;
+  yearsExperienceProvenance: FactProvenance;
+  /** Always 'preference' (D-22) - a search criterion, not a fact about the past. */
   desiredTitles: string[];
   desiredLocations: string[];
   desiredWorkMode: WorkModePreference | null;
   desiredSalaryMin: number | null;
   desiredSalaryMax: number | null;
   desiredSalaryCurrency: string | null;
-  resumeFilename: string | null;
-  resumeText: string | null;
-  resumeUploadedAt: Date | null;
+  /** Always 'self_asserted' (D-22). */
   linkedinUrl: string | null;
   githubUrl: string | null;
   portfolioUrl: string | null;
@@ -39,6 +65,11 @@ export interface ProfileSkill {
   id: string;
   accountId: AccountId;
   skill: string;
+  provenance: FactProvenance;
+  /** Free text, e.g. 'resume:experience[0].bullets[2]' - where this was seen. */
+  evidenceRef: string | null;
+  /** Required when provenance is 'ai_inference' (DB CHECK, not just here). */
+  confidence: number | null;
   createdAt: Date;
 }
 
@@ -52,8 +83,36 @@ export interface ProfileExperience {
   endDate: string | null;
   isCurrent: boolean;
   description: string | null;
+  provenance: FactProvenance;
+  evidenceRef: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Ephemeral resume retention (ADR D-31).
+ *
+ * Split off candidate_profile deliberately - see packages/db's
+ * 0009_provenance_and_retention.sql. Everything here is purged the moment
+ * job_search_session turns off; candidate_profile's other fields are not.
+ */
+export interface ResumeUpload {
+  accountId: AccountId;
+  filename: string;
+  rawText: string;
+  uploadedAt: Date;
+}
+
+export type JobSearchStatus = 'active' | 'stopped';
+export type JobSearchStopReason = 'user_action' | 'scheduled_sweep_inactivity';
+
+export interface JobSearchSession {
+  id: string;
+  accountId: AccountId;
+  status: JobSearchStatus;
+  startedAt: Date;
+  stoppedAt: Date | null;
+  stopReason: JobSearchStopReason | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,3 +200,19 @@ export const updateExperienceInput = z
   });
 
 export type UpdateExperienceInput = z.infer<typeof updateExperienceInput>;
+
+/**
+ * Starting a job search and uploading a resume are one action (ADR D-31) -
+ * "upload it in real time when they ask it to start job switch." There is
+ * deliberately no way to set only the filename or only the text.
+ */
+export const startJobSearchInput = z.object({
+  filename: z.string().trim().min(1, 'Missing a filename.').max(255),
+  rawText: z
+    .string()
+    .trim()
+    .min(50, 'That does not look like a resume - paste the full text.')
+    .max(50_000),
+});
+
+export type StartJobSearchInput = z.infer<typeof startJobSearchInput>;
