@@ -49,6 +49,11 @@ beforeAll(async () => {
   await ownerPool.query('DELETE FROM resume_source');
   await ownerPool.query('DELETE FROM resume_upload');
   await ownerPool.query('DELETE FROM job_search_session');
+  // Layer 1 fixture from the purge test below - not tenant data, so it is
+  // deliberately not touched by stopJobSearch's own purge, and needs its
+  // own cleanup here for a repeatable run. CASCADE takes career_source,
+  // job_posting and job_posting_version with it.
+  await ownerPool.query("DELETE FROM company WHERE normalized_domain = 'purgetestco.example'");
   await ownerPool.query('DELETE FROM account_member');
   await ownerPool.query('DELETE FROM app_user');
   await ownerPool.query('DELETE FROM account');
@@ -205,13 +210,65 @@ describe('startJobSearch / stopJobSearch behaviour', () => {
       ),
     );
 
+    // job_match/match_explanation are app_matcher-owned (BYPASSRLS), so
+    // seed them via the owner pool - exercising a real row in each, not
+    // just trusting the purge list names them.
+    const companyId = (
+      await ownerPool.query<{ id: string }>(
+        `INSERT INTO company (name, normalized_domain) VALUES ('Purge Test Co', 'purgetestco.example')
+         RETURNING id`,
+      )
+    ).rows[0]!.id;
+    const sourceId = (
+      await ownerPool.query<{ id: string }>(
+        `INSERT INTO career_source (company_id, ats_type, board_identifier)
+         VALUES ($1, 'greenhouse', 'purgetestco') RETURNING id`,
+        [companyId],
+      )
+    ).rows[0]!.id;
+    const postingId = (
+      await ownerPool.query<{ id: string }>(
+        `INSERT INTO job_posting
+           (career_source_id, company_id, source_job_id, canonical_title, normalized_title, apply_url)
+         VALUES ($1, $2, 'job-1', 'Engineer', 'engineer', 'https://example.com/apply')
+         RETURNING id`,
+        [sourceId, companyId],
+      )
+    ).rows[0]!.id;
+    const versionId = (
+      await ownerPool.query<{ id: string }>(
+        `INSERT INTO job_posting_version (job_posting_id, content_fingerprint, title)
+         VALUES ($1, 'fp1', 'Engineer') RETURNING id`,
+        [postingId],
+      )
+    ).rows[0]!.id;
+    await ownerPool.query(
+      `INSERT INTO job_match
+         (account_id, job_posting_id, job_posting_version_id, score, vector_score,
+          keyword_score, skill_score, seniority_score, location_score, freshness_score, matcher_version)
+       VALUES ($1, $2, $3, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 1)`,
+      [purgeeId, postingId, versionId],
+    );
+    await ownerPool.query(
+      `INSERT INTO match_explanation (account_id, job_posting_version_id, summary, evidence, model, prompt_version)
+       VALUES ($1, $2, 'Good fit.', '[]'::jsonb, 'test-model', 1)`,
+      [purgeeId, versionId],
+    );
+
     const result = await withAccount(webPool, purgeeId, (tx) =>
       jobSearchRepo.stopJobSearch(tx, purgeeId, 'user_action'),
     );
     expect(result?.session.status).toBe('stopped');
     expect(result?.session.stopReason).toBe('user_action');
     expect(result?.purgedTables.sort()).toEqual(
-      ['job_application', 'resume_artifact', 'resume_source', 'resume_upload'].sort(),
+      [
+        'job_application',
+        'job_match',
+        'match_explanation',
+        'resume_artifact',
+        'resume_source',
+        'resume_upload',
+      ].sort(),
     );
 
     // Verify via the owner pool (bypasses RLS) that the rows are truly gone,
@@ -221,7 +278,9 @@ describe('startJobSearch / stopJobSearch behaviour', () => {
          (SELECT count(*) FROM resume_upload WHERE account_id = $1) +
          (SELECT count(*) FROM resume_source WHERE account_id = $1) +
          (SELECT count(*) FROM resume_artifact WHERE account_id = $1) +
-         (SELECT count(*) FROM job_application WHERE account_id = $1)
+         (SELECT count(*) FROM job_application WHERE account_id = $1) +
+         (SELECT count(*) FROM job_match WHERE account_id = $1) +
+         (SELECT count(*) FROM match_explanation WHERE account_id = $1)
          AS c`,
       [purgeeId],
     );

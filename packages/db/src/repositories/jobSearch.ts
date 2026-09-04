@@ -130,18 +130,33 @@ export async function startJobSearch(
  * or imply a specific employer engaged with via this product, during an
  * active search?" test).
  *
- * NOT exhaustive against the full ADR yet - job_match, match_explanation and
- * outreach_draft are also purge targets once they exist (0011, 0012). This
- * list, and the purge below, MUST be extended in the same migration that
- * creates each of those tables. That is a deliberate, tracked gap, not an
- * oversight: referencing a table before it exists would break every
- * migration before it.
+ * job_match and job_search_session's own account_id give it a home too:
+ * a persisted match names a specific posting the candidate was shown
+ * during this search, so it purges like everything else here.
+ * match_explanation cascades automatically via job_match's... no - it does
+ * not FK to job_match, it FKs to job_posting_version directly, so it needs
+ * its own explicit delete, included below.
+ *
+ * NOT exhaustive against the full ADR yet - outreach_draft is also a purge
+ * target once it exists (0012). This list, and the purge below, MUST be
+ * extended in the same migration that creates it. That is a deliberate,
+ * tracked gap, not an oversight: referencing a table before it exists would
+ * break every migration before it.
+ *
+ * profile_embedding is intentionally NOT here yet either, even though it is
+ * keyed by account_id and clearly in scope (D-31 names it explicitly as a
+ * purge target for the 'resume' kind) - wiring it is Phase 5.3 work, done
+ * alongside the embedding worker that is the only thing that writes it.
+ * Purging a column nothing populates yet would be a no-op dressed up as a
+ * guarantee.
  */
 const PURGE_TABLES = [
   'resume_upload',
   'resume_source',
   'resume_artifact',
   'job_application',
+  'job_match',
+  'match_explanation',
 ] as const;
 
 /**
