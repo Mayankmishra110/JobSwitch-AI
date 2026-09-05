@@ -193,19 +193,94 @@ original `docs/CURRENT_STATE.md` audit.
 | Go | `internal/match/seniority_test.go` | Word-pattern detection matches TS's priority order; adjacency scoring |
 | Go | `internal/match/signals_test.go` | Each signal function's edge cases (no skills, unknown comp, future timestamps, no location preference) |
 | Go | `internal/match/match_integration_test.go` | Full pipeline against real Postgres: correct match on location+skills, closed/stale postings excluded, **cross-tenant isolation** (two accounts, two profiles, assert zero cross-account `job_match` writes and each account's own match is exactly right), a profile-less account doesn't crash |
+| Go | `internal/queue/queue_test.go` | Claim/complete/fail/backoff/dedup semantics; concurrent-claim race safety; **cross-language interop** against a literal copy of `queue.ts`'s own SQL |
+| Go | `internal/clients/ai_test.go` | Request shape, header, error mapping (fake HTTP server) + a real call against the live `services/ai` process |
+| Go | `internal/worker/embed_test.go` | **Full loop, no fakes**: real posting → real embedding call → real vector read back from Postgres |
 | Go | `internal/session/*` | See `specs/session-auth.md` |
+
+## The queue and `cmd/worker` (Phase 5.3)
+
+`internal/queue` is a Go port of `packages/db/src/repositories/queue.ts`,
+reproduced **statement-for-statement** against the same `job_queue` table
+apps/worker already claims from - see `specs/ingestion.md`. Same claim
+SQL (`FOR UPDATE SKIP LOCKED`, `attempts` incremented at claim time), same
+backoff formula (`min(base * 2^(attempts-1), max)` plus up to 30% jitter),
+same dead-letter threshold. Two languages share one queue with zero
+coordination beyond the SQL itself.
+
+**Proven, not assumed**: `internal/queue/queue_test.go` includes a
+concurrency test (10 goroutines racing for 20 jobs, each claimed exactly
+once) and a genuine interop test —`TestClaimInteropWithTSStyleQuery` runs
+Go's `Claim()` concurrently against a second query built from the
+**literal SQL text** in `queue.ts`'s own `claim()` function, both racing
+for the same rows. No job is ever claimed twice across the two query
+styles. This is not the same as spawning a real Node process, but it
+directly tests the property that actually matters: the two languages'
+claim queries are safe to run against the same table at the same time.
+
+`cmd/worker/main.go`: claim → dispatch by queue name → handler → complete
+or fail, mirroring `apps/worker`'s own `Worker.execute` shape (unroutable
+job → immediate dead-letter, not five wasted retries). Currently
+registers exactly one handler:
+
+```go
+handlers := map[string]handlerFunc{
+    worker.EmbedJobVersionQueue: worker.HandleEmbedJobVersion(matcherPool, aiClient),
+}
+```
+
+### `embed.job_version` — verified genuinely end to end
+
+`internal/worker/embed.go`'s `HandleEmbedJobVersion`: reads a
+`job_posting_version`'s title+description (Matcher pool - already granted
+`SELECT` on Layer 1 since migration 0005, no new grant needed), calls
+`services/ai`'s real `/v1/embed` (`internal/clients/ai.go`), writes the
+vector back via the column-level grant migration 0010 gives `app_matcher`
+(`UPDATE (embedding, embedding_model, embedded_at)` only).
+
+`internal/worker/embed_test.go`'s `TestHandleEmbedJobVersionEndToEnd` is
+the full-loop proof, no fakes anywhere: seeds a real `company` →
+`career_source` → `job_posting` → `job_posting_version` chain, calls the
+handler against the **real running Python service**, reads the embedding
+back from Postgres and confirms `vector_dims(embedding) = 384` and
+`embedding_model = 'BAAI/bge-small-en-v1.5'`. Skips itself (doesn't fail)
+if `services/ai` isn't running locally.
+
+`internal/clients/ai.go`'s own `TestEmbedAgainstRealAIService` is the same
+kind of proof at the client layer alone - Go calling the real Python
+process directly, confirming a real 384-dim vector comes back.
 
 ## Known gaps / what's explicitly deferred
 
-- **`cmd/worker` doesn't exist.** `RunForAccount` has no scheduled caller.
-- **No embeddings, no LLM.** `Vector`/`Keyword` are always `0`; no
-  `match_explanation` rows are ever written yet.
+- **Nothing enqueues onto `embed.job_version` yet.** `apps/worker`'s TS
+  ingestion pipeline (`packages/ingest/src/run.ts`) doesn't call
+  `queue.Enqueue` after committing a new/changed `job_posting_version` -
+  the handler exists and is proven correct, but nothing schedules it in
+  a live pipeline. Today it only runs when a test (or a future manual
+  backfill) calls it directly.
+- **No `embed.profile` handler.** Embedding a candidate's résumé/desired-
+  role text into `profile_embedding` isn't built. It also needs a new
+  grant first: `app_matcher` has no `SELECT` on `resume_upload` yet (only
+  `app_web` does, per `specs/ephemeral-retention.md`) - the same shape of
+  gap `0012_matcher_reads_applications.sql` closed for `job_application`,
+  not yet closed here.
+- **`RunForAccount` still hardcodes `Vector: 0, Keyword: 0`.** Stage 2
+  (hybrid retrieval: vector search against the now-real embeddings, fused
+  with the keyword rank via Reciprocal Rank Fusion) isn't wired into the
+  matching pipeline yet, even though the embeddings it would search over
+  now genuinely exist for any version that's been through
+  `embed.job_version`. `structuredOnlyWeights` is still the active weight
+  set.
+- **`cmd/worker`'s handler map has exactly one entry** and nothing calls
+  `repo.ActiveJobSearchAccountIDs` + `RunForAccount` on a schedule - the
+  binary can claim and run `embed.job_version` jobs if any exist, but
+  there is no periodic "compute matches for every active search" loop
+  yet.
 - **`cmd/mcp` doesn't exist.** Planned (later phase): search/filter/track
   tools over the Go API, explicitly forbidden from sending email or
   submitting applications.
-- **Not deployed anywhere.** `cmd/api` builds and runs locally
-  (`/healthz`, `/readyz`, one smoke-test authenticated route); no
-  container image, no k8s manifest yet.
+- **Not deployed anywhere.** `cmd/api` and `cmd/worker` both build and run
+  locally; no container image, no k8s manifest yet.
 - **`internal/repo.UpsertMatches` pipelines one `INSERT` per row via
   `pgx.Batch`.** Correct at Phase 5.2's hundreds-to-low-thousands scale;
   a single multi-row `VALUES` statement would cut round trips further,
