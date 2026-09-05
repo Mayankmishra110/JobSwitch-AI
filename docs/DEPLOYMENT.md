@@ -30,11 +30,16 @@ Migrations create the group roles (`app_web`, `app_ingest`, `app_matcher`).
 You create the login roles and grant membership.
 
 ```sql
-CREATE ROLE app_web_prod    LOGIN PASSWORD '<generated>';
-CREATE ROLE app_ingest_prod LOGIN PASSWORD '<generated>';
+CREATE ROLE app_web_prod     LOGIN PASSWORD '<generated>';
+CREATE ROLE app_ingest_prod  LOGIN PASSWORD '<generated>';
+CREATE ROLE app_matcher_prod LOGIN PASSWORD '<generated>';
 
-GRANT app_web    TO app_web_prod;
-GRANT app_ingest TO app_ingest_prod;
+GRANT app_web     TO app_web_prod;
+GRANT app_ingest  TO app_ingest_prod;
+GRANT app_matcher TO app_matcher_prod;
+
+-- app_matcher_prod ALSO needs this next line - see the callout below.
+ALTER ROLE app_matcher_prod BYPASSRLS;
 ```
 
 **The application must never connect as the database owner.** The owner
@@ -42,11 +47,31 @@ bypasses RLS, so running the app as the owner turns tenant isolation off
 without any error, log line, or failing test. It is the single most damaging
 misconfiguration available in this system.
 
+**`app_matcher_prod` needs its own explicit `BYPASSRLS`, and this is easy to
+get wrong.** `BYPASSRLS` is a role *attribute*, not a privilege - unlike the
+table grants `app_matcher` carries, Postgres deliberately does **not**
+propagate role attributes (`LOGIN`, `SUPERUSER`, `BYPASSRLS`, ...) through
+`GRANT` membership, even with the default `INHERIT` behavior. `GRANT
+app_matcher TO app_matcher_prod` alone gives `app_matcher_prod` every table
+privilege `app_matcher` holds, but leaves `app_matcher_prod`'s own
+`rolbypassrls` at `false` - the matcher service would then fail every write
+with "new row violates row-level security policy," exactly as if `app_matcher`
+had never been granted `BYPASSRLS` in migration `0001` at all. This was found
+by `services/matcher`'s own integration tests failing against a real
+database, not by inspection - the equivalent mistake in the test suite's own
+role setup was the first thing it caught (see
+`services/matcher/internal/match/match_integration_test.go`).
+
 Verify after deploying:
 
 ```sql
--- Should be false. If true, RLS is not protecting anything.
+-- app_web_prod: should be false. If true, RLS is not protecting anything.
 SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = 'app_web_prod';
+
+-- app_matcher_prod: should be TRUE. If false, the matcher cannot write
+-- job_match rows for any account - the opposite failure mode, but still a
+-- broken deploy.
+SELECT rolbypassrls FROM pg_roles WHERE rolname = 'app_matcher_prod';
 ```
 
 ## 3. DNS
@@ -71,6 +96,7 @@ Set from `.env.example`. In production specifically:
 |---|---|---|
 | `NODE_ENV` | `production` | Enables HSTS and the Secure cookie flag |
 | `DATABASE_URL` | the **app_web** role | Never the owner |
+| `DATABASE_URL_MATCHER` | the **app_matcher** role (`BYPASSRLS`, see §2) | `services/matcher` only - never used by `apps/web` |
 | `DATABASE_URL_MIGRATE` | the owner role | Deploy step only, never in the running app |
 | `DATABASE_SSL` | `true` | |
 | `SESSION_SECRET` | `openssl rand -base64 48` | Rotating it signs everyone out |
