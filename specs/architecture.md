@@ -22,7 +22,11 @@ jobswitch-ai/
       cmd/api/       HTTP entrypoint (session validation, /healthz, /readyz)
       cmd/worker/    NOT YET BUILT — will run RunForAccount per active search
       internal/config, db, session, httpx, repo, match, rank
-    ai/           NOT YET BUILT (Phase 5.3) — FastAPI, embeddings, LangGraph
+    ai/           Python (uv) — FastAPI, stateless, no DB (Phase 5.3+)
+      app/main.py, config, models, embed, llm, explain_service, routers/
+      Real fastembed embeddings; LLM explanation chain UNVERIFIED against
+      a real provider (no live key in this environment) - see
+      specs/embeddings-and-explanation.md. LangGraph not added yet.
   docs/           PRD, ADR, CURRENT_STATE, GAP_ANALYSIS, DEPLOYMENT
   specs/          This directory
 ```
@@ -94,9 +98,18 @@ exists in code yet.
 ## Testing philosophy
 
 No mocks for anything Postgres/RLS/tenancy touches — proven by running
-against a real `pgvector/pgvector:pg16` container, locally and in CI.
-Mocks are appropriate (and, for paid/nondeterministic calls, mandatory)
-only for external LLM/embedding providers once those exist. This has
-already caught multiple real bugs that review alone would have missed —
-each one is documented in the relevant feature spec, not just fixed
+against a real `pgvector/pgvector:pg16` container, locally and in CI. This
+has already caught multiple real bugs that review alone would have missed
+— each one is documented in the relevant feature spec, not just fixed
 silently.
+
+The one deliberate exception is a paid, nondeterministic third party: LLM
+calls are tested against a fake implementing the same client interface
+(`services/ai/tests/fakes.py`'s `FakeLLM`), never a live provider — a
+mocked LLM is the only way to have a deterministic suite, and the
+alternative (a live call in CI) would be nondeterministic, slow, and
+billed per run. **Embeddings are the opposite case**: `fastembed` runs
+locally with no network dependency once its model is cached, so
+`specs/embeddings-and-explanation.md`'s tests use the real model — a
+mocked embedding would prove nothing about whether it actually produces
+sensible vectors, which is the one thing worth testing.

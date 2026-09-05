@@ -27,11 +27,12 @@ right and the spec is stale — fix the spec.
 | [profile-and-provenance.md](profile-and-provenance.md) | Candidate profile, skills, experience, the fact-provenance model (D-22) |
 | [ephemeral-retention.md](ephemeral-retention.md) | Job search sessions, résumé storage, the D-31 purge mechanic |
 | [matching-pipeline.md](matching-pipeline.md) | The Go matcher service: hard constraints, structured ranking, `job_match` |
+| [embeddings-and-explanation.md](embeddings-and-explanation.md) | The Python `services/ai`: real `fastembed` embeddings, LLM match explanations, the provenance gate |
 
-**Coverage status**: every backend feature built through Phase 5.2 has a
+**Coverage status**: every backend feature built through Phase 5.3 has a
 spec. Not yet covered because not yet built: the Next.js dashboard
-(Phase 6), the application workspace (Phase 7), embeddings/LLM/tailoring
-(Phase 5.3+), event bus/SSE (Phase 5.5), Kubernetes deployment (Phase 5.0).
+(Phase 6), the application workspace (Phase 7), résumé tailoring/LangGraph
+(Phase 5.4), event bus/SSE (Phase 5.5), Kubernetes deployment (Phase 5.0).
 Each gets a spec when it's built, not before.
 
 ## Writing a new spec
