@@ -9,6 +9,7 @@ Different purpose from `docs/`:
 | `docs/ADR.md` | Which architectural decision, and why, numbered (D-01…) |
 | `docs/CURRENT_STATE.md` | A point-in-time factual audit (may drift as code changes) |
 | `docs/GAP_ANALYSIS.md` | Current vs. proposed, as of one specific audit |
+| `docs/BUILD_PLAN.md` | The target architecture and phase sequence (Go/Python/k8s/NATS/LangGraph) — **start here for what's next and why**, then this directory for what's actually built |
 | **`specs/*.md`** | **How one specific feature actually works, kept current as it changes** — schema, code paths, edge cases, known bugs found and how they were fixed, test coverage |
 
 A spec is maintained, not archived: when a feature changes, its spec
