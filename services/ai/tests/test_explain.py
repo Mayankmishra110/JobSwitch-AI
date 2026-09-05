@@ -6,6 +6,7 @@ silently trusted.
 
 from fastapi.testclient import TestClient
 
+from app.config import Settings, get_settings
 from app.main import app
 from app.routers.explain import get_llm_client
 from tests.fakes import FakeLLM
@@ -160,8 +161,17 @@ def test_explain_passes_the_facts_to_the_prompt(client: TestClient) -> None:
 
 
 def test_explain_returns_503_when_no_provider_is_configured(client: TestClient) -> None:
-    # No override - the real get_llm_client dependency runs, which raises
-    # LLMConfigError because this test environment has no real API keys
-    # (see app/llm.py's own doc comment on why that's true and expected).
-    res = client.post("/v1/match/explain", json=REQUEST_BODY)
-    assert res.status_code == 503
+    # Explicit empty-keys override, not environment absence: a real
+    # GROQ_API_KEY may legitimately be present in this environment's own
+    # .env (see app/llm.py's doc comment - it's used for live verification,
+    # deliberately not committed), so this test must not depend on the
+    # environment having no key. It asserts the 503 behavior itself, via a
+    # Settings instance constructed with every key forced empty.
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        groq_api_key=None, gemini_api_key=None, openai_api_key=None
+    )
+    try:
+        res = client.post("/v1/match/explain", json=REQUEST_BODY)
+        assert res.status_code == 503
+    finally:
+        app.dependency_overrides.clear()

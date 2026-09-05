@@ -53,7 +53,7 @@ model should be **baked into the container image at build time**, not
 downloaded on cold start, per the plan's own flagged risk. Not yet done —
 no Dockerfile exists for this service.
 
-## `/v1/match/explain` — built, tested against a fake, UNVERIFIED live
+## `/v1/match/explain` — NOW VERIFIED LIVE, real Groq key
 
 ```
 POST /v1/match/explain  { job: {title, company?, description}, facts: [{ref, text, provenance}] }
@@ -88,20 +88,42 @@ three separate SDK integrations. Provider selection
 order Mayankbuilt's `nipun` pipeline uses (`src/lib/resume/llm.ts`),
 matched deliberately rather than reinvented.
 
-### NEVER VERIFIED AGAINST A REAL PROVIDER
+### Verified live, and it caught a real bug on the first try
 
-No live API key exists in this build environment — `Mayankbuilt/.env.local`
-(the one plausible source) holds only a placeholder (`GROQ_API_KEY=gsk_...`),
-confirmed by reading it directly. Everything about this endpoint — the
-request shape, JSON-mode parsing, the provenance gate, error mapping — is
-implemented and tested against `FakeLLM` (`tests/fakes.py`) and, for the
-real HTTP client itself, `httpx.MockTransport` (`tests/test_llm.py` — this
-exercises `OpenAICompatibleLLM.complete_json`'s actual JSON-parsing logic,
-which `FakeLLM`-based tests never touch since `FakeLLM` bypasses HTTP
-entirely). The live round trip against a real Groq/Gemini/OpenAI key has
-never run. Same honesty standard as the ATS adapters and Google OAuth
-(`specs/ingestion.md`, `specs/auth-and-identity.md`): treat the first real
-call as the actual verification, not this test suite.
+A real Groq key was supplied and wired into `services/ai/.env` (gitignored,
+never committed). The **first** live call failed: `502 {"detail":"LLM
+provider returned 404"}` — the hardcoded default model,
+`llama-3.3-70b-versatile`, no longer exists on Groq. Groq rotates/deprecates
+model ids often enough that a hardcoded default written from training data
+is not a safe assumption, confirmed exactly the way `specs/ingestion.md`'s
+"never verified" adapters warned it would: the gap surfaces on the first
+real run, not before. Fixed by querying `GET /openai/v1/models` with the
+real key and picking a current model with `json_mode` support —
+`openai/gpt-oss-20b` — rather than guessing again. `resolve_llm_client`'s
+default is now that model, with a comment noting it was live-verified and
+where to re-check if it 404s again in the future.
+
+**Second call, corrected model, succeeded completely**: a real request
+citing a candidate's title and two verified skills against a Senior
+Frontend Engineer posting returned a well-formed, correctly-grounded
+explanation — every evidence item cited a real `fact_ref` with the right
+`provenance` tag, nothing hallucinated, valid JSON on the first attempt.
+
+This also exposed a real test fragility, fixed in the same pass:
+`test_explain_returns_503_when_no_provider_is_configured` had assumed "no
+key is configured" by relying on the test environment having none — true
+before this key was added, false after. Fixed to override `get_settings`
+with an explicit empty-keys `Settings()` instance instead of depending on
+what happens to be in `.env` at test time.
+
+The request shape, JSON-mode parsing, and error mapping are additionally
+tested against `FakeLLM` (`tests/fakes.py`) and, for the real HTTP client's
+own JSON-parsing logic specifically, `httpx.MockTransport`
+(`tests/test_llm.py`) — both still valuable for deterministic, free,
+offline coverage of cases a live call wouldn't reliably exercise (malformed
+provider output, HTTP error statuses). The live path is no longer the
+untested one; the ATS adapters and Google OAuth (`specs/ingestion.md`,
+`specs/auth-and-identity.md`) remain in that state.
 
 ### Error mapping
 

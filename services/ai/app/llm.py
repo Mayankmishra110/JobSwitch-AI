@@ -88,7 +88,11 @@ def resolve_llm_client(
         return OpenAICompatibleLLM(
             "https://api.groq.com/openai/v1",
             groq_api_key,
-            model_override or "llama-3.3-70b-versatile",
+            # Groq deprecates/rotates model ids frequently - this default
+            # was live-verified against GET /openai/v1/models with a real
+            # key (2026-09), not assumed from training data. If this ever
+            # 404s again, check that endpoint before guessing a new name.
+            model_override or "openai/gpt-oss-20b",
             http_client,
         )
     if gemini_api_key:

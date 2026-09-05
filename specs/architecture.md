@@ -24,9 +24,10 @@ jobswitch-ai/
       internal/config, db, session, httpx, repo, match, rank
     ai/           Python (uv) — FastAPI, stateless, no DB (Phase 5.3+)
       app/main.py, config, models, embed, llm, explain_service, routers/
-      Real fastembed embeddings; LLM explanation chain UNVERIFIED against
-      a real provider (no live key in this environment) - see
-      specs/embeddings-and-explanation.md. LangGraph not added yet.
+      Real fastembed embeddings; LLM explanation chain verified live
+      against a real Groq key (caught a stale hardcoded model id on the
+      first call - see specs/embeddings-and-explanation.md). LangGraph
+      not added yet.
   docs/           PRD, ADR, CURRENT_STATE, GAP_ANALYSIS, DEPLOYMENT
   specs/          This directory
 ```
