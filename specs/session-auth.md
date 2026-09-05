@@ -1,10 +1,13 @@
 # Session authentication
 
-Email+password and Google OAuth login, both producing the same kind of
-session: a signed-nothing, hashed-token cookie validated identically by
-every service that needs to know who's asking. Built Phase 1 (TS); the
-same mechanism was reproduced independently in Go for Phase 5.2's matcher
-API, verified byte-for-byte against the TS implementation.
+How a session is **validated** on every request after login — the
+`js_session` cookie mechanism, shared identically by every service that
+needs to know who's asking. For how a session gets created in the first
+place (signup, login, password reset, Google OAuth), see
+`specs/auth-and-identity.md`; this spec starts from an already-issued
+cookie. Built Phase 1 (TS); the same validation logic was reproduced
+independently in Go for Phase 5.2's matcher API, verified byte-for-byte
+against the TS implementation.
 
 ## How a session is created
 

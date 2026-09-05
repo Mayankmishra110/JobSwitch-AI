@@ -20,11 +20,19 @@ right and the spec is stale — fix the spec.
 | Spec | Covers |
 |---|---|
 | [architecture.md](architecture.md) | System-wide shape: layers, services, languages, database roles, deployment target |
-| [session-auth.md](session-auth.md) | Login, sessions, the `js_session` cookie, cross-language validation (TS ↔ Go) |
+| [auth-and-identity.md](auth-and-identity.md) | Signup, login, logout, password reset, Google OAuth, rate limiting, health/readiness |
+| [session-auth.md](session-auth.md) | How a session is **validated** on every request after login: the `js_session` cookie, the hash, cross-language parity (TS ↔ Go) |
+| [audit-log.md](audit-log.md) | The append-only `audit_log` table: what's written, what isn't, why writes never block the action they're logging |
 | [ingestion.md](ingestion.md) | ATS adapters, the job index, the Postgres queue, the scheduler |
 | [profile-and-provenance.md](profile-and-provenance.md) | Candidate profile, skills, experience, the fact-provenance model (D-22) |
 | [ephemeral-retention.md](ephemeral-retention.md) | Job search sessions, résumé storage, the D-31 purge mechanic |
 | [matching-pipeline.md](matching-pipeline.md) | The Go matcher service: hard constraints, structured ranking, `job_match` |
+
+**Coverage status**: every backend feature built through Phase 5.2 has a
+spec. Not yet covered because not yet built: the Next.js dashboard
+(Phase 6), the application workspace (Phase 7), embeddings/LLM/tailoring
+(Phase 5.3+), event bus/SSE (Phase 5.5), Kubernetes deployment (Phase 5.0).
+Each gets a spec when it's built, not before.
 
 ## Writing a new spec
 
