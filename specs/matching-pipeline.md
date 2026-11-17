@@ -1,14 +1,19 @@
-# Matching pipeline (`services/matcher`)
+# Matching pipeline (`services/backend`)
 
-A new Go service computing per-account job matches. Phase 5.2 ships the
+A new Go service computing per-account job matches. Phase 5.2 shipped the
 **structured-only** half of the pipeline — hard constraints, SQL
-prefiltering, and a pure-Go ranking function — with no embeddings and no
-LLM calls yet. Phase 5.3 adds retrieval (`services/ai`, not yet built);
-Phase 5.4 adds LLM explanations.
+prefiltering, and a pure-Go ranking function. Phase 5.3 added retrieval
+(`services/ai`'s real embeddings, plus the hybrid retrieval wired into this
+service below), the `embed.job_version`/`embed.profile` enqueue points, and
+now Stage 4: `explain.match`, calling `services/ai`'s already-built plain
+sequential explain chain for the top matches of each run. LangGraph's
+Graph B (self-critique, provenance-gate retry loop) upgrading that same
+call is still Phase 5.4, as planned — this wiring is the synchronous
+baseline the plan itself says should exist first.
 
 ## Why Go, why a separate module
 
-`go.mod` at `services/matcher/go.mod` — not part of the pnpm workspace.
+`go.mod` at `services/backend/go.mod` — not part of the pnpm workspace.
 Decision, not default: the candidate wanted Go and Python represented in
 the stack (see `docs/PRD.md`'s framing), and the matching/ranking hot path
 is the natural fit for it — concurrent, CPU-bound scoring over a
@@ -19,7 +24,7 @@ was deliberately **not** rewritten.
 ## Pipeline shape
 
 ```
-Hard constraints (SQL, cheap)  →  [Phase 5.3: hybrid retrieval]  →  Structured ranking (pure Go)  →  Persisted job_match
+Hard constraints (SQL, cheap)  →  Hybrid retrieval (pgvector + tsvector, RRF)  →  Structured ranking (pure Go)  →  Persisted job_match  →  LLM explanation (top 20/run, async)
 ```
 
 ### Stage 1 — hard-constraint prefilter (`internal/repo.PrefilterCandidates`)
@@ -53,12 +58,45 @@ One CTE against `job_posting`/`job_posting_version`/`job_posting_location`:
   expected steady-state truncation (the plan's own estimate is
   200–2000 survivors from a 25k-posting index).
 
-### Stage 2 — retrieval (NOT YET BUILT)
+### Stage 2 — hybrid retrieval (`internal/repo.HybridRetrieve`)
 
-Phase 5.3: vector search (resume embedding + desired-role embedding, both
-against the prefiltered CTE) fused with the keyword rank via Reciprocal
-Rank Fusion. Until then, `rank.Signals.Vector` and `.Keyword` are always
-`0`.
+Scores every Stage 1 survivor for semantic and lexical relevance against
+one account's query embeddings (`profile_embedding`, migration 0010) and
+keyword floor (the same `buildKeywordFloor` string Stage 1 already
+searched with).
+
+**Vector** is Reciprocal Rank Fusion, named explicitly per D-32 rather than
+hand-blending cosine distances: up to two independent rankings — by cosine
+distance (`<=>`) to the resume embedding, and to the desired-role
+embedding — are combined as `Σ 1/(60+rank_i)`, summed over whichever of
+the two the account actually has a query vector for. The fused score is
+normalized against the maximum achievable with however many of those two
+rankers actually ran, so an account with only one kind of query embedding
+is judged on the same `[0, 1]` scale as one with both, rather than being
+structurally capped below it.
+
+**Keyword** stays a separate, independently-weighted signal rather than
+being folded into that same RRF sum — this is the actual reason D-32 names
+RRF at all: `ts_rank_cd` and cosine distance live on incomparable scales,
+and forcing them into one blended number would mean silently deciding how
+many keyword-rank positions equal one embedding-rank position. Postgres's
+own normalization option `32` (`rank/(rank+1)`) bounds `ts_rank_cd` to
+`[0, 1)` without that guess; combining it with `Vector` at genuinely
+different scales is `rank.Score`'s job (a renormalized weighted average —
+this codebase's already-established way to combine signals of different
+kinds), not `HybridRetrieve`'s.
+
+**Unknown data scores neutral (`0.5`), never `0`** — matching every other
+"not yet known" signal in this pipeline (`LocationScore`,
+`SeniorityScore`'s either-side-unknown case): a posting whose version has
+no embedding yet (`embed.job_version` hasn't reached it), or an account
+with no query embedding at all (a résumé/profile whose `embed.profile`
+job hasn't run yet, or an account that hasn't triggered one at all - see
+the `embed.profile` section below), must not be penalized for a fact
+nobody has computed. This is also what makes `rank.DefaultWeights()` safe
+to use unconditionally now (see below) — a `0.5` contributes its neutral
+share instead of dragging the total down by Vector/Keyword's combined 40%
+share the way a hardcoded `0` would.
 
 ### Stage 3 — ranking (`internal/rank` + `internal/match`)
 
@@ -74,23 +112,20 @@ type Signals struct {
 }
 ```
 
-**Phase 5.2 uses `structuredOnlyWeights`, not `rank.DefaultWeights()`** —
-`internal/match/match.go`:
-
-```go
-var structuredOnlyWeights = rank.Weights{
-    Skill: 0.45, Seniority: 0.25, Location: 0.15, Comp: 0.05, Freshness: 0.10,
-}
-```
-
-`DefaultWeights()` allocates 40% of total weight to Vector+Keyword.
-Passing it here — with every `Signals.Vector`/`.Keyword` hardcoded to
-`0` — would silently under-score every single candidate by that 40%,
-since `Score`'s renormalization only excludes a dimension when its
-*weight* is zero, not when its *value* happens to be zero. This exact
-failure mode is what `rank/rank_test.go`'s
-`TestScore/before_Phase_5.3,_Vector_and_Keyword_are_always_0` exists to
-name explicitly.
+**`internal/match/match.go` now uses `rank.DefaultWeights()`** — Phase
+5.2's `structuredOnlyWeights` (which zeroed `Weights.Vector`/`.Keyword`
+outright) has been removed now that Stage 2 gives those two dimensions a
+real value on every run, never a hardcoded `0`. `DefaultWeights()`
+allocates 40% of total weight to Vector+Keyword; that would have silently
+under-scored every candidate by that share back when the values were
+unconditionally `0` (`Score`'s renormalization only excludes a dimension
+when its *weight* is zero, not when its *value* happens to be zero) — the
+exact failure mode `rank/rank_test.go`'s
+`TestScore/before_Phase_5.3,_Vector_and_Keyword_are_always_0` still exists
+to name explicitly, as a regression guard on `rank.Score`'s own pure
+arithmetic, not on `match.go`'s current behavior. It stays safe today
+specifically because Stage 2's "unknown" fallback is the neutral `0.5`
+described above, not `0`.
 
 #### The four structured signals, and their honest scope
 
@@ -110,9 +145,13 @@ already excluded by Stage 1's own `NOT EXISTS` clause, so this function is
 never even called for one. That's a property of the query shape, not a
 special case in the upsert code.
 
-`matcher_version` (currently `1`, `match.MatcherVersion`) is bumped
+`matcher_version` (currently `2`, `match.MatcherVersion`) is bumped
 whenever the ranking formula changes materially — every prior `job_match`
-row becomes recognizably stale without a data migration.
+row becomes recognizably stale without a data migration. Bumped from `1`
+to `2` when Stage 2 hybrid retrieval went in: Vector/Keyword flipping from
+hardcoded `0` to real values under `rank.DefaultWeights()`'s nonzero
+weight for them changes the score for every existing row, not just new
+ones.
 
 ## Orchestration: `internal/match.RunForAccount`
 
@@ -127,13 +166,15 @@ explicitly, since RLS provides no backstop for a bypassing role. This
 discipline is the entire tenant-isolation guarantee for this code path,
 and it's proven, not assumed — see the cross-tenant test below.
 
-**Not yet wired to anything that runs on a schedule.** `cmd/worker` (the
-binary that would call `repo.ActiveJobSearchAccountIDs` then
+**Now wired to a real schedule.** `internal/worker/schedule.go`'s
+`RunScheduledTasks` calls `repo.ActiveJobSearchAccountIDs` then
 `RunForAccount` per account, per ADR D-13's per-account BYPASSRLS
-iteration pattern) does not exist yet. `RunForAccount` today is called
-only from tests.
+iteration pattern, every `MATCH_TICK_MS` (default 5 minutes) - see
+`specs/ephemeral-retention.md` for the scheduler itself. `RunForAccount`
+also enqueues Stage 4 (`explain.match`, top 20 by score) after
+`UpsertMatches` commits - see that section below.
 
-## Two real bugs, found by testing against real Postgres
+## Four real bugs, found by testing against real Postgres
 
 ### 1. `app_matcher` had no grant on `job_application`
 
@@ -185,6 +226,49 @@ for this one role, the inverse of every other role's check). `.env.example`
 gained `DATABASE_URL_MATCHER`, the fourth role URL predicted back in the
 original `docs/CURRENT_STATE.md` audit.
 
+### 3. `go test ./...` raced its own shared Postgres database
+
+Go runs each package's tests as a separate OS process, in parallel by
+default (`-p`, defaulting to `GOMAXPROCS`) — but `internal/session`,
+`internal/queue`, `internal/match`, and `internal/worker` all do broad,
+unscoped cleanup (`DELETE FROM <table>`, not scoped to one test's own rows)
+against the *same* real Postgres database, and running two of those
+packages' tests concurrently means one's cleanup can delete rows another
+is mid-assertion on. Surfaced as real, intermittently-failing tests
+(`TestResolveValidSession`, `TestHandleEmbedProfileEndToEnd`) under a plain
+`go test ./...`; confirmed as a parallelism issue, not a logic bug, by
+re-running with `-p 1` (forces sequential package execution) and getting a
+clean pass. Fixed structurally rather than left as "remember to pass
+`-p 1`": `internal/testutil.WithSerializedDBAccess` takes a blocking
+`pg_advisory_lock` for the duration of a package's test run, and each of
+those four packages now has a one-line `TestMain` calling it. Exact same
+problem as `packages/db/vitest.config.ts`'s `fileParallelism: false` on the
+TS side ("Serial is correct here, not a workaround"), and the same
+advisory-lock idiom `apps/scheduler` and `internal/worker/schedule.go`
+already use for their own singleton guards — a blocking lock rather than
+`pg_try_advisory_lock`, since a test package should wait its turn rather
+than skip its run.
+
+### 4. `app_matcher` had no grant for the dormancy sweep, twice over
+
+Once `internal/worker/schedule.go`'s scheduled sweep existed to actually
+call `FindDormantActiveSessions`/`SweepDormantSession` against a real
+`app_matcher` role, it failed immediately: `job_search_session` had only
+ever been granted to `app_web` (migration 0009, before `app_matcher` read
+it at all) — same shape of gap as bug 1 above. Fixed with `0015_matcher_
+dormancy_sweep_grants.sql` (`SELECT, UPDATE` on `job_search_session`;
+`DELETE` on whichever purge-target tables `app_matcher` didn't already
+hold it on). That migration alone wasn't enough: the sweep still failed
+purging `resume_source`/`resume_artifact` with "permission denied," because
+Postgres requires `SELECT` on any column a `DELETE`'s `WHERE` clause reads
+(here, `account_id`) *in addition to* `DELETE` itself —
+`resume_upload`/`job_application`/`match_explanation` didn't hit this
+because each already had `SELECT` from an earlier migration (0013, 0012,
+0011), but `resume_source`/`resume_artifact` never had any `app_matcher`
+grant before 0015. Closed by `0016_matcher_purge_needs_select_too.sql`.
+Both caught by `schedule_test.go`'s integration test actually running the
+sweep end to end against real Postgres, not by reading the grant list.
+
 ## Tests
 
 | Suite | File | Proves |
@@ -192,11 +276,20 @@ original `docs/CURRENT_STATE.md` audit.
 | Go | `internal/rank/rank_test.go` | Weighted scoring, nil-Comp exclusion, the "structured-only weights must not silently sink the score" property |
 | Go | `internal/match/seniority_test.go` | Word-pattern detection matches TS's priority order; adjacency scoring |
 | Go | `internal/match/signals_test.go` | Each signal function's edge cases (no skills, unknown comp, future timestamps, no location preference) |
-| Go | `internal/match/match_integration_test.go` | Full pipeline against real Postgres: correct match on location+skills, closed/stale postings excluded, **cross-tenant isolation** (two accounts, two profiles, assert zero cross-account `job_match` writes and each account's own match is exactly right), a profile-less account doesn't crash |
+| Go | `internal/match/match_integration_test.go` | Full pipeline against real Postgres: correct match on location+skills, closed/stale postings excluded, **cross-tenant isolation** (two accounts, two profiles, assert zero cross-account `job_match` writes and each account's own match is exactly right), a profile-less account doesn't crash, (`TestRunForAccountUsesHybridRetrieval`) **Stage 2 itself**: a real seeded `profile_embedding` + two real `job_posting_version.embedding` values, no fakes, asserting RRF ranks the cosine-identical posting above the orthogonal one and neither falls back to the neutral `0.5` default, and (`TestRunForAccountEnqueuesExplainMatchCappedAtTop20`) **Stage 4's cap**: 25 matches enqueue exactly 20 `explain.match` jobs |
+| Go | `internal/worker/explain_test.go` | **Full loop, real LLM call**: real posting + real profile, real `services/ai` call, real Groq response, valid evidence JSON, and a second call against the same pair hits the D-09 cache instead of calling the LLM again; plus a no-live-service cache-hit test and a payload-validation test |
 | Go | `internal/queue/queue_test.go` | Claim/complete/fail/backoff/dedup semantics; concurrent-claim race safety; **cross-language interop** against a literal copy of `queue.ts`'s own SQL |
 | Go | `internal/clients/ai_test.go` | Request shape, header, error mapping (fake HTTP server) + a real call against the live `services/ai` process |
 | Go | `internal/worker/embed_test.go` | **Full loop, no fakes**: real posting → real embedding call → real vector read back from Postgres |
+| Go | `internal/worker/embed_profile_test.go` | Same, both `profile_embedding` kinds, plus (no live service needed) nothing-to-embed is a no-op and an unchanged `source_hash` skips the AI call - both proven by pointing the client at an unreachable address and confirming no error and no wrong write |
+| Go | `internal/worker/schedule_test.go` | `RunScheduledTasks`'s two halves against real Postgres - see `specs/ephemeral-retention.md` |
 | Go | `internal/session/*` | See `specs/session-auth.md` |
+
+Every package above shares one real Postgres database across `go test
+./...`'s parallel package processes, so `internal/session`, `internal/
+queue`, `internal/match`, and `internal/worker` each carry a `TestMain`
+that serializes via `internal/testutil.WithSerializedDBAccess` (bug 3
+above) - a plain `go test ./...` is safe to run as-is, no `-p 1` needed.
 
 ## The queue and `cmd/worker` (Phase 5.3)
 
@@ -220,12 +313,15 @@ claim queries are safe to run against the same table at the same time.
 
 `cmd/worker/main.go`: claim → dispatch by queue name → handler → complete
 or fail, mirroring `apps/worker`'s own `Worker.execute` shape (unroutable
-job → immediate dead-letter, not five wasted retries). Currently
-registers exactly one handler:
+job → immediate dead-letter, not five wasted retries). Registers three
+handlers, plus runs `RunScheduledTasks` (above) as a goroutine alongside
+the claim loop:
 
 ```go
 handlers := map[string]handlerFunc{
     worker.EmbedJobVersionQueue: worker.HandleEmbedJobVersion(matcherPool, aiClient),
+    worker.EmbedProfileQueue:    worker.HandleEmbedProfile(matcherPool, aiClient),
+    repo.ExplainMatchQueue:      worker.HandleExplainMatch(matcherPool, aiClient),
 }
 ```
 
@@ -250,32 +346,191 @@ if `services/ai` isn't running locally.
 kind of proof at the client layer alone - Go calling the real Python
 process directly, confirming a real 384-dim vector comes back.
 
+### `embed.profile` — the query-side embedding worker
+
+`internal/worker/embed_profile.go`'s `HandleEmbedProfile` computes one of
+an account's two `profile_embedding` rows (migration 0010's `kind IN
+('resume', 'desired_role')`):
+
+- **`resume`**: `repo.GetResumeText` reads `resume_upload.raw_text`
+  (`app_matcher` granted `SELECT` by migration 0013, mirroring 0012's
+  grant on `job_application` - the matcher reads it to embed, never
+  writes, updates, or deletes it).
+- **`desired_role`**: `repo.DesiredRoleText` builds one string from
+  `current_title` + `desired_titles` + `profile_skill` - deliberately the
+  *same* fields `PrefilterCandidates`'s `buildKeywordFloor` already treats
+  as the candidate's role-intent signal, so the embedding and Stage 1's
+  keyword floor agree on what "the role this candidate wants" means
+  rather than each inventing its own definition.
+
+Either kind can genuinely have nothing to embed yet (no résumé uploaded;
+no title, desired titles, or skills given) - the handler returns `nil`
+without writing anything, the same "not yet known, not an error" pattern
+as `LoadCandidateFacts`'s profile-less account.
+
+**Skip-when-unchanged, not just idempotent-when-rerun**: before calling
+`services/ai`, the handler hashes the text (`sha256`) and compares it
+against `profile_embedding.source_hash` - a column that existed since
+migration 0010 specifically for this (its own doc comment already named
+the plan). An unchanged hash skips the AI call entirely rather than
+re-embedding identical text. This is *why* the TS producers below can
+afford to enqueue unconditionally on every write rather than each
+deciding which specific field change is "worth" a re-embed - that
+decision happens exactly once, here.
+
+**Producers** (`packages/core/src/profile.ts`'s `EMBED_PROFILE_QUEUE` /
+`EmbedProfilePayload`, the same cross-language-by-string-matching contract
+`EMBED_JOB_VERSION_QUEUE` already uses):
+
+| Kind | Enqueued from | Dedup key |
+|---|---|---|
+| `resume` | `jobSearchRepo.startJobSearch`, every call (including "already active, just updating the résumé") | `embed.profile:<accountId>:resume` |
+| `desired_role` | `profileRepo.upsertProfile` and `profileRepo.replaceSkills`, every call | `embed.profile:<accountId>:desired_role` |
+
+Both dedup keys collapse repeated rapid writes into one still-pending job
+safely, because the payload carries no text of its own (just `accountId`
++ `kind`) - the handler always reads the *current* `resume_upload`/
+`candidate_profile`/`profile_skill` state at claim time, so a job that
+sat queued through three edits still embeds the latest one, not a stale
+snapshot from whichever edit happened to enqueue it.
+
+**Verified genuinely end to end, both kinds, no fakes**:
+`internal/worker/embed_profile_test.go`'s `TestHandleEmbedProfileEndToEnd`
+seeds a real `resume_upload` and a real `candidate_profile`, calls the
+real running Python service for both kinds, and confirms both rows read
+back with `vector_dims = 384`, the real model name, and a non-empty
+`source_hash`. Skips itself if `services/ai` isn't running locally, same
+as the job-version test. Two more tests prove the no-fakes-needed edge
+cases directly against Postgres: `TestHandleEmbedProfileNoContentIsANoOp`
+(nothing to embed writes nothing, and never even attempts an HTTP call -
+proven by pointing the client at an unreachable address) and
+`TestHandleEmbedProfileSkipsTheAICallWhenUnchanged` (a matching
+`source_hash` already on file means the same unreachable client never
+gets called and the row is left untouched).
+
+### D-31's purge, extended: `profile_embedding`'s `resume` kind
+
+`jobSearchRepo.stopJobSearch` (`packages/db/src/repositories/jobSearch.ts`)
+now also runs `DELETE FROM profile_embedding WHERE account_id = $1 AND
+kind = 'resume'` - closing the gap `0010_embeddings.sql`'s own comment
+named ("profile_embedding is ... a purge target under D-31's retention
+mechanic once the resume kind is re-embedded per search cycle"). This is
+**not** a `PURGE_TABLES` array entry like everything else that table
+purges: every other entry is a blanket `DELETE FROM table WHERE
+account_id = $1`, but `profile_embedding`'s `desired_role` kind is derived
+from `candidate_profile`/`profile_skill` - retained biography, not search
+activity - so it survives the purge exactly like those tables do. Needed
+its own new grant too: migration 0014 gives `app_web` `DELETE` on
+`profile_embedding` (the RLS policy already existed from 0010; RLS and
+`GRANT` are independent checks, and a policy with no table privilege
+still fails closed). See `specs/ephemeral-retention.md`.
+
+### `explain.match` — Stage 4, the LLM explanation queue
+
+`internal/match.RunForAccount` sorts one run's `job_match` writes by score
+descending and enqueues `explain.match` (`internal/repo.ExplainMatchQueue`)
+for the top `explainTopN` (20) only — an LLM call per candidate/posting
+pair is real, uncapped cost otherwise, and a posting ranked 200th in one
+account's feed is unlikely to be shown prominently enough to be worth
+explaining. Dedup key is `explain.match:<accountId>:<jobPostingVersionId>`,
+the same pair `match_explanation`'s primary key uses (D-09) — a version
+already queued or already explained is a safe no-op.
+
+**Why the queue name lives in `internal/repo`, not `internal/worker` like
+every other queue name here**: this is the first queue with a Go producer
+*and* a Go consumer. `internal/worker` already imports `internal/match`
+(`schedule.go` calls `RunForAccount`), so `match` importing `worker` back
+for the constant would be a straight import cycle. `repo` is the shared
+dependency both already have, so `ExplainMatchQueue` is defined there.
+
+`internal/worker/explain.go`'s `HandleExplainMatch`:
+
+1. **Cache check first** (`repo.HasMatchExplanation`) — D-09 again: an
+   existing row for this `(account_id, job_posting_version_id)` pair means
+   the version hasn't changed since it was explained, so the handler
+   returns `nil` without calling `services/ai` at all.
+2. **`repo.GetJobExplanationContext`** joins `job_posting_version ->
+   job_posting -> company` for the `{title, company, description}` the
+   LLM needs — no new grant required, `company` already carries the same
+   Layer 1 `SELECT` grant `job_posting`/`job_posting_version` have had
+   since migration 0005.
+3. **`explanationFacts`** turns `repo.CandidateFacts` into the
+   provenance-tagged list `/v1/match/explain` requires (D-22 made
+   structural, same principle as Graph B's eventual `provenance_gate`):
+   `current_title` and `years_experience` carry their own real
+   `_provenance` columns (`candidate_profile`), each skill carries its own
+   real `profile_skill.provenance` (`repo.SkillFact`, new alongside the
+   plain `Skills []string` Stage 3 already used, so that existing code
+   didn't need to change shape), and `desired_titles` is hardcoded
+   `'preference'` — not a guess, but migration 0009's own documented
+   invariant for that column (`COMMENT ON COLUMN ... 'Always preference'`).
+4. **`ai.Explain`** (`internal/clients/ai.go`) calls the real
+   `POST /v1/match/explain`.
+5. **`repo.WriteMatchExplanation`** upserts the result — `ON CONFLICT ...
+   DO UPDATE`, not `DO NOTHING`, so a queue retry after a partial failure
+   is still correct, not just harmless.
+
+No new migration needed: `app_matcher` already held every grant this
+touches (`candidate_profile`/`profile_skill` SELECT since 0009,
+`match_explanation` SELECT/INSERT/UPDATE since 0011, `company` SELECT
+since 0005) - the first Stage 4 integration test to actually run this
+found zero missing grants, unlike every earlier stage in this file.
+
+**Verified genuinely end to end, real LLM call included**:
+`internal/worker/explain_test.go`'s `TestHandleExplainMatchEndToEnd` seeds
+a real posting and a real candidate profile/skill, calls the real running
+`services/ai` process (which itself calls a real Groq key), and confirms a
+non-empty summary, a real model name, valid JSON evidence, and that a
+second call against the same pair hits the D-09 cache instead of calling
+the LLM again. `TestHandleExplainMatchSkipsWhenAlreadyCached` proves the
+cache path alone, no live service needed, the same "point the client at an
+unreachable address" trick `embed_profile_test.go` already uses.
+`internal/match/match_integration_test.go`'s
+`TestRunForAccountEnqueuesExplainMatchCappedAtTop20` proves the cap itself:
+25 matching postings for one account enqueue exactly 20 `explain.match`
+jobs, never 25.
+
 ## Known gaps / what's explicitly deferred
 
-- **Nothing enqueues onto `embed.job_version` yet.** `apps/worker`'s TS
-  ingestion pipeline (`packages/ingest/src/run.ts`) doesn't call
-  `queue.Enqueue` after committing a new/changed `job_posting_version` -
-  the handler exists and is proven correct, but nothing schedules it in
-  a live pipeline. Today it only runs when a test (or a future manual
-  backfill) calls it directly.
-- **No `embed.profile` handler.** Embedding a candidate's résumé/desired-
-  role text into `profile_embedding` isn't built. It also needs a new
-  grant first: `app_matcher` has no `SELECT` on `resume_upload` yet (only
-  `app_web` does, per `specs/ephemeral-retention.md`) - the same shape of
-  gap `0012_matcher_reads_applications.sql` closed for `job_application`,
-  not yet closed here.
-- **`RunForAccount` still hardcodes `Vector: 0, Keyword: 0`.** Stage 2
-  (hybrid retrieval: vector search against the now-real embeddings, fused
-  with the keyword rank via Reciprocal Rank Fusion) isn't wired into the
-  matching pipeline yet, even though the embeddings it would search over
-  now genuinely exist for any version that's been through
-  `embed.job_version`. `structuredOnlyWeights` is still the active weight
-  set.
-- **`cmd/worker`'s handler map has exactly one entry** and nothing calls
-  `repo.ActiveJobSearchAccountIDs` + `RunForAccount` on a schedule - the
-  binary can claim and run `embed.job_version` jobs if any exist, but
-  there is no periodic "compute matches for every active search" loop
-  yet.
+- **`packages/ingest/src/run.ts` now enqueues `embed.job_version`** inside
+  the same transaction as `jobsRepo.upsertPosting`, whenever a version is
+  newly created or its content changed (`upserted.versionCreated`) - see
+  `run.ts`'s `EMBED_JOB_VERSION_QUEUE`/`EmbedJobVersionPayload` and
+  `packages/ingest/test/run.test.ts`'s "embedding enqueue" suite. Dedup key
+  is the version id itself, so a re-run within the same hour is a cheap
+  no-op rather than a duplicate job. This closes the gap this section used
+  to describe ("nothing enqueues onto `embed.job_version` yet").
+- **`embed.profile` is now built** (`internal/worker/embed_profile.go`,
+  registered in `cmd/worker`'s handler map alongside `embed.job_version`)
+  - see the section above. `profile_embedding` now has a real writer for
+  both kinds, so `HybridRetrieve`'s Vector signal is genuinely non-neutral
+  once an account has gone through a résumé upload and/or a profile/skills
+  write *and* `cmd/worker` has actually processed the resulting queue
+  jobs. It still reads neutral `0.5` for an account that hasn't done
+  either yet, or whose jobs haven't been claimed yet - correct fallback
+  behavior, not a bug, just no longer the permanent state it was before
+  this closed.
+- **`RunForAccount` now wires Stage 2 for real** — `internal/repo.
+  HybridRetrieve` (vector RRF + normalized `ts_rank_cd`) replaces the old
+  hardcoded `Vector: 0, Keyword: 0`, and `match.go` uses
+  `rank.DefaultWeights()` instead of the retired `structuredOnlyWeights`.
+  Proven against real Postgres with real seeded embeddings and no fakes:
+  `internal/match/match_integration_test.go`'s
+  `TestRunForAccountUsesHybridRetrieval`.
+- **Closed**: `cmd/worker`'s handler map now has three entries
+  (`embed.job_version`, `embed.profile`, `explain.match`), and
+  `internal/worker/schedule.go`'s `RunScheduledTasks` runs a periodic
+  `ActiveJobSearchAccountIDs` + `RunForAccount` loop alongside the
+  queue-claim loop, plus the D-31 dormancy sweep - see
+  `specs/ephemeral-retention.md` and this file's "Four real bugs" section
+  (bug 4).
+- **Closed**: `/v1/match/explain` is now wired to something -
+  `RunForAccount` enqueues `explain.match` for the top 20 matches of every
+  run, `cmd/worker` claims and answers them for real. See the
+  `explain.match` section above. Only the plain sequential chain
+  `services/ai` already shipped in Phase 5.3 - LangGraph's Graph B
+  (self-critique pass, bounded retry on an unsupported claim) replacing it
+  is still Phase 5.4, unstarted.
 - **`cmd/mcp` doesn't exist.** Planned (later phase): search/filter/track
   tools over the Go API, explicitly forbidden from sending email or
   submitting applications.

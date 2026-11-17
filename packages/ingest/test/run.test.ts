@@ -60,6 +60,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  await pool.query(`DELETE FROM job_queue WHERE queue = 'embed.job_version'`);
   await pool.query('DELETE FROM scrape_run');
   await pool.query('DELETE FROM job_group_link');
   await pool.query('DELETE FROM job_group');
@@ -186,6 +187,53 @@ describe('re-running', () => {
       'SELECT count(*)::int AS count FROM job_posting_version',
     );
     expect(rows[0]!.count).toBe(2);
+  });
+});
+
+describe('embedding enqueue', () => {
+  it('enqueues one embed.job_version job per newly created version', async () => {
+    await run(boardReturning([job(), job({ id: 7002, title: 'Backend Engineer' })]));
+
+    const { rows: jobs } = await pool.query<{ payload: { versionId: string } }>(
+      `SELECT payload FROM job_queue WHERE queue = 'embed.job_version'`,
+    );
+    expect(jobs).toHaveLength(2);
+
+    const { rows: versions } = await pool.query<{ id: string }>(
+      'SELECT id FROM job_posting_version',
+    );
+    const versionIds = versions.map((v) => v.id).sort();
+    const enqueuedIds = jobs.map((j) => j.payload.versionId).sort();
+    expect(enqueuedIds).toEqual(versionIds);
+  });
+
+  it('does not enqueue again when content is unchanged', async () => {
+    await run(boardReturning([job()]));
+    await run(boardReturning([job()]));
+
+    const { rows } = await pool.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM job_queue WHERE queue = 'embed.job_version'`,
+    );
+    expect(rows[0]!.count).toBe(1);
+  });
+
+  it('enqueues again when the description changes, for the new version only', async () => {
+    await run(boardReturning([job()]));
+    await run(
+      boardReturning([job({ content: '&lt;p&gt;Now we want Vue and 8 years.&lt;/p&gt;' })]),
+    );
+
+    const { rows: jobs } = await pool.query<{ payload: { versionId: string } }>(
+      `SELECT payload FROM job_queue WHERE queue = 'embed.job_version'`,
+    );
+    expect(jobs).toHaveLength(2);
+
+    const { rows: versions } = await pool.query<{ id: string }>(
+      'SELECT id FROM job_posting_version ORDER BY captured_at',
+    );
+    expect(jobs.map((j) => j.payload.versionId).sort()).toEqual(
+      versions.map((v) => v.id).sort(),
+    );
   });
 });
 

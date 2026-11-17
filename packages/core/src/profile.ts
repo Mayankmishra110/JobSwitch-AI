@@ -73,6 +73,23 @@ export interface ProfileSkill {
   createdAt: Date;
 }
 
+/**
+ * One provenance-tagged fact about a candidate, in the shape both
+ * services/ai's Fact (app/models.py) and services/backend's Fact
+ * (internal/clients/ai.go) already require - every fact sent to an LLM
+ * boundary carries the provenance it was actually recorded with, per D-22.
+ * TS's own caller (apps/web, calling services/ai directly for tailoring -
+ * see specs/application-workspace.md) builds this the same way Go's
+ * internal/worker/explain.go already does for match explanation, so the
+ * two independent callers stay in parity without sharing code across the
+ * language boundary.
+ */
+export interface CandidateFact {
+  ref: string;
+  text: string;
+  provenance: FactProvenance;
+}
+
 export interface ProfileExperience {
   id: string;
   accountId: AccountId;
@@ -216,3 +233,23 @@ export const startJobSearchInput = z.object({
 });
 
 export type StartJobSearchInput = z.infer<typeof startJobSearchInput>;
+
+/**
+ * Queue name services/backend's cmd/worker claims from
+ * (internal/worker/embed_profile.go's EmbedProfileQueue) - a cross-language
+ * contract enforced only by both sides matching this string and
+ * EmbedProfilePayload's shape exactly, the same way
+ * packages/ingest/src/run.ts's EMBED_JOB_VERSION_QUEUE already works.
+ */
+export const EMBED_PROFILE_QUEUE = 'embed.profile';
+
+/**
+ * Which of an account's two profile_embedding rows (migration 0010,
+ * CHECK (kind IN ('resume', 'desired_role'))) to (re-)compute.
+ */
+export type ProfileEmbeddingKind = 'resume' | 'desired_role';
+
+export interface EmbedProfilePayload {
+  accountId: string;
+  kind: ProfileEmbeddingKind;
+}

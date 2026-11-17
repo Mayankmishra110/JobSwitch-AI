@@ -67,7 +67,7 @@ covered by a dedicated test in both languages (see below).
 
 On success, `resolveSession` (TS) / `session.Resolve` (Go) return a
 `Principal { userId, accountId, role, sessionId }` — `packages/core/src/
-identity.ts` and `services/matcher/internal/session/session.go`
+identity.ts` and `services/backend/internal/session/session.go`
 respectively, kept in lockstep by hand (no shared schema-gen between the
 languages yet).
 
@@ -79,7 +79,7 @@ services needs to own, and `apps/web` already does it.
 
 ## The Go reimplementation
 
-`services/matcher/internal/session/session.go`. Connects on the **Web**
+`services/backend/internal/session/session.go`. Connects on the **Web**
 pool (`app_web`-granted, RLS enforced — Layer 0 tables aren't RLS-protected
 anyway, but this is the same pool `WithAccount` uses for everything else,
 kept consistent rather than opening a third pool just for this). Wired into
@@ -109,7 +109,7 @@ Everything here was verified, not assumed, against real Postgres:
 `packages/db/test/fixtures/session-tokens.json` is a committed set of
 `{rawToken, sha256Hex}` pairs, generated once with Node's `crypto` module.
 **Both** `packages/db/test/sessionTokenParity.test.ts` (vitest) and
-`services/matcher/internal/session/session_test.go`
+`services/backend/internal/session/session_test.go`
 (`TestHashTokenMatchesTypeScriptFixture`) assert their own language's hash
 function against the same file. If the two languages' hashing ever
 diverges — a wrong encoding, a UTF-8/UTF-16 mismatch, hashing decoded bytes
@@ -122,7 +122,7 @@ with no need to spin up both services and manually compare a real login.
   (`SESSION_TTL_SECONDS`), matching what Phase 1 shipped.
 - The Go side has no logout/revoke endpoint yet — only `apps/web` can
   revoke a session today.
-- `services/matcher/cmd/api`'s only authenticated route right now is a
+- `services/backend/cmd/api`'s only authenticated route right now is a
   temporary smoke-test endpoint (`GET /api/v1/_internal/whoami`), meant to
   be replaced by the first real route (`GET /api/v1/matches`), not grown
   into a permanent one.

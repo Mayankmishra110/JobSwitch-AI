@@ -1,14 +1,17 @@
+import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import {
   Errors,
   experienceInput,
   isUuid,
   replaceSkillsInput,
+  resumeVariantIdInput,
   updateExperienceInput,
   upsertProfileInput,
+  upsertResumeSourceInput,
   type ExperienceInput,
 } from '@jobswitch/core';
-import { profileRepo, withAccount } from '@jobswitch/db';
+import { artifactsRepo, profileRepo, withAccount } from '@jobswitch/db';
 
 /**
  * Personal profile routes - Layer 2, Phase 4.
@@ -120,6 +123,63 @@ export async function registerProfileRoutes(app: FastifyInstance): Promise<void>
         if (!updated) throw Errors.notFound('That experience entry');
         return { experience: updated };
       });
+    },
+  );
+
+  // ---- resume_source - the candidate's LaTeX template(s) (Phase 7) ------
+
+  app.get('/api/v1/profile/resume-source', { preHandler: app.requireAuth }, async (request) => {
+    const principal = request.principal;
+    if (!principal) throw Errors.unauthenticated();
+
+    const sources = await withAccount(pool, principal.accountId, (tx) =>
+      artifactsRepo.listResumeSources(tx, principal.accountId),
+    );
+    // tex omitted from the list view - each entry can be tens of KB, and
+    // the picker (screen 2's tailor button) only needs variantId/label.
+    return { sources: sources.map(({ tex: _tex, ...rest }) => rest) };
+  });
+
+  app.get<{ Params: { variantId: string } }>(
+    '/api/v1/profile/resume-source/:variantId',
+    { preHandler: app.requireAuth },
+    async (request) => {
+      const principal = request.principal;
+      if (!principal) throw Errors.unauthenticated();
+
+      const source = await withAccount(pool, principal.accountId, (tx) =>
+        artifactsRepo.getResumeSource(tx, principal.accountId, request.params.variantId),
+      );
+      if (!source) throw Errors.notFound('That resume');
+      return { source };
+    },
+  );
+
+  app.put<{ Params: { variantId: string } }>(
+    '/api/v1/profile/resume-source/:variantId',
+    { preHandler: app.requireAuth },
+    async (request) => {
+      const principal = request.principal;
+      if (!principal) throw Errors.unauthenticated();
+
+      const parsedVariant = resumeVariantIdInput.safeParse(request.params.variantId);
+      if (!parsedVariant.success) throw Errors.validation(parsedVariant.error.flatten());
+
+      const parsed = upsertResumeSourceInput.safeParse(request.body);
+      if (!parsed.success) throw Errors.validation(parsed.error.flatten());
+
+      const sha256 = createHash('sha256').update(parsed.data.tex, 'utf8').digest('hex');
+
+      const source = await withAccount(pool, principal.accountId, (tx) =>
+        artifactsRepo.upsertResumeSource(tx, principal.accountId, {
+          variantId: parsedVariant.data,
+          label: parsed.data.label,
+          pdfBaseName: parsed.data.pdfBaseName,
+          tex: parsed.data.tex,
+          sha256,
+        }),
+      );
+      return { source };
     },
   );
 

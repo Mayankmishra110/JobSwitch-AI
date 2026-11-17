@@ -57,10 +57,10 @@ privilege `app_matcher` holds, but leaves `app_matcher_prod`'s own
 `rolbypassrls` at `false` - the matcher service would then fail every write
 with "new row violates row-level security policy," exactly as if `app_matcher`
 had never been granted `BYPASSRLS` in migration `0001` at all. This was found
-by `services/matcher`'s own integration tests failing against a real
+by `services/backend`'s own integration tests failing against a real
 database, not by inspection - the equivalent mistake in the test suite's own
 role setup was the first thing it caught (see
-`services/matcher/internal/match/match_integration_test.go`).
+`services/backend/internal/match/match_integration_test.go`).
 
 Verify after deploying:
 
@@ -96,7 +96,7 @@ Set from `.env.example`. In production specifically:
 |---|---|---|
 | `NODE_ENV` | `production` | Enables HSTS and the Secure cookie flag |
 | `DATABASE_URL` | the **app_web** role | Never the owner |
-| `DATABASE_URL_MATCHER` | the **app_matcher** role (`BYPASSRLS`, see §2) | `services/matcher` only - never used by `apps/web` |
+| `DATABASE_URL_MATCHER` | the **app_matcher** role (`BYPASSRLS`, see §2) | `services/backend` only - never used by `apps/web` |
 | `DATABASE_URL_MIGRATE` | the owner role | Deploy step only, never in the running app |
 | `DATABASE_SSL` | `true` | |
 | `SESSION_SECRET` | `openssl rand -base64 48` | Rotating it signs everyone out |

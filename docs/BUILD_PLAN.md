@@ -5,45 +5,108 @@
 > specifically so it survives as part of the project rather than depending on
 > an ephemeral local file a fresh session wouldn't know to look for.
 >
-> **Status as of 2026-09-05, end of session**: Phases 5.0 (infra), 5.4
-> (LangGraph/tailoring), 5.5 (events/SSE), and 6+ (dashboard, application
-> workspace, email) have **not started**. Phases 5.1, 5.2, and 5.3 are
-> **done** — ahead of what this plan's own text below still describes as
-> pending in a few places. Read `specs/README.md` first for the accurate,
+> **Status as of 2026-09-06**: Phase 5.0 (infra — deliberately skipped for
+> now, needs real cloud accounts this session cannot provision), 5.5
+> (events/SSE), and 6+ (dashboard, application workspace, email) have
+> **not started**. Phases 5.1, 5.2, 5.3, and now **5.4 are done** — ahead
+> of what this plan's own text below still describes as pending in a few
+> places. Read `specs/README.md` first for the accurate,
 > continuously-maintained picture of what's actually built; treat this
 > document as the target architecture and the phase sequence, not as a
 > live status report. Specific corrections to what's below:
-> - **5.1 is done**: `0009_provenance_and_retention.sql` shipped combining
->   D-22 (provenance) and D-31 (retention) exactly as planned.
->   `POST /api/v1/job-search/{start,stop,status}` exist and are tested.
->   The scheduler dormancy sweep is **explicitly deferred** to 5.2's worker
->   (see `specs/ephemeral-retention.md`) rather than added to
->   `apps/scheduler` as this plan originally assumed — `apps/scheduler`
->   runs as `app_ingest`, which structurally cannot do this cross-tenant
->   query safely; the sweep needs a `BYPASSRLS` role, which `cmd/worker`
->   now has.
+> - **5.4 is done**: `packages/resume-core` (extracted from `Mayankbuilt`'s
+>   `nipun` pipeline, byte-exact, 32 tests against a real resume fixture —
+>   deliberately dropped `registry.ts`'s bundled-variant lookup, since this
+>   product stores a candidate's template per-account in `resume_source`,
+>   not as a compile-time bundle of one person's resumes), `apps/tailor`
+>   (new Fastify service — parse/validate-nouns/reinject/compile, real
+>   local `pdflatex` compilation verified end to end, 12 tests), and
+>   LangGraph in `services/ai` (Graph B replaces the Phase 5.3 plain chain
+>   behind the existing `/v1/match/explain` route with zero contract
+>   changes; Graph A is the new `POST /v1/tailor/resume`). A real bug was
+>   found and fixed by testing Graph A against the real `apps/tailor`
+>   service: `fabrication_check` was checking a proposed edit against the
+>   *already-spliced* document, making the check tautological — fixed to
+>   check against the original. See `specs/resume-tailoring.md`.
+> - **5.1 is done, including the scheduled sweep**: `0009_provenance_and_
+>   retention.sql` shipped combining D-22 (provenance) and D-31 (retention)
+>   exactly as planned. `POST /api/v1/job-search/{start,stop,status}` exist
+>   and are tested. The dormancy sweep went to `cmd/worker`, not
+>   `apps/scheduler` as this plan originally assumed — `apps/scheduler` runs
+>   as `app_ingest`, which structurally cannot do this cross-tenant query
+>   safely; the sweep needs a `BYPASSRLS` role, which `cmd/worker` has. It's
+>   now real: `internal/worker/schedule.go`'s `RunScheduledTasks` runs
+>   alongside `cmd/worker`'s queue-claim loop (its own advisory lock, `pg_
+>   try_advisory_lock`, distinct from `apps/scheduler`'s), computing matches
+>   for every active job search (`MATCH_TICK_MS`, default 5min) then
+>   sweeping sessions dormant past `DORMANT_SESSION_STALE_DAYS` (default 90)
+>   — same hard-delete purge `stopJobSearch` does, `stop_reason =
+>   'scheduled_sweep_inactivity'`. Needed a new migration
+>   (`0015_matcher_dormancy_sweep_grants.sql` + `0016_matcher_purge_needs_
+>   select_too.sql`) granting `app_matcher` access to `job_search_session`
+>   and the purge tables it didn't already hold — caught by the integration
+>   test actually running the sweep against real Postgres, not by
+>   inspection; see `specs/ephemeral-retention.md`.
 > - **5.2 is done, minus k8s deployment** (blocked on 5.0/infra, not on
->   code): `services/matcher` exists (`cmd/api`, `cmd/worker` — no
+>   code): `services/backend` exists (`cmd/api`, `cmd/worker` — no
 >   `cmd/mcp`/`cmd/backfill` yet), hard-constraint prefilter, structured-
 >   only ranking, `job_match` write path, all tested against real Postgres
 >   including a cross-tenant leakage test. D-32's `EXPLAIN ANALYZE` artifact
 >   was **not** produced — see gaps below.
-> - **5.3 is done for embeddings, done-and-live-verified for the plain LLM
->   chain**: `services/ai` (FastAPI, `uv`-managed) ships real `fastembed`
->   embeddings and a plain sequential explain chain (not LangGraph — that's
->   still 5.4, as planned). **Live-verified against a real Groq key** —
->   caught and fixed a real bug (a deprecated hardcoded model id) in the
->   process; see `specs/embeddings-and-explanation.md`. Hybrid retrieval
->   (RRF) is **not yet wired into the Go matcher** — `internal/match/
->   match.go` still hardcodes `Vector: 0, Keyword: 0`, even though real
->   embeddings now exist for anything that's been through the
->   `embed.job_version` handler. Nothing yet enqueues onto that queue from
->   `packages/ingest/src/run.ts`. No `embed.profile` handler exists (needs
->   a new `app_matcher` grant on `resume_upload` first).
+> - **5.3 is done**, including the two pieces this note previously flagged
+>   as outstanding: `packages/ingest/src/run.ts` now enqueues
+>   `embed.job_version` (inside the same transaction as `upsertPosting`,
+>   dedup-keyed on the version id) whenever a version is newly created or
+>   changed, and `internal/repo.HybridRetrieve` wires real Stage 2 hybrid
+>   retrieval (pgvector cosine RRF + normalized `ts_rank_cd`) into
+>   `internal/match/match.go`, which now uses `rank.DefaultWeights()`
+>   instead of the retired `structuredOnlyWeights`. Proven against real
+>   Postgres with real seeded embeddings, no fakes — see
+>   `specs/matching-pipeline.md`'s Stage 2 section and
+>   `TestRunForAccountUsesHybridRetrieval`. `services/ai` (FastAPI,
+>   `uv`-managed) ships real `fastembed` embeddings and a plain sequential
+>   explain chain (not LangGraph — that's still 5.4, as planned).
+>   **Live-verified against a real Groq key** — caught and fixed a real bug
+>   (a deprecated hardcoded model id) in the process; see
+>   `specs/embeddings-and-explanation.md`. **`embed.profile` is also now
+>   built** (`internal/worker/embed_profile.go`, registered in
+>   `cmd/worker`): computes `profile_embedding`'s `resume` kind
+>   (`resume_upload.raw_text`, migration 0013's new `app_matcher` grant)
+>   and `desired_role` kind (`current_title` + `desired_titles` +
+>   `profile_skill`, the same fields the Stage 1 keyword floor already
+>   uses), skipping the actual AI call when `source_hash` shows the text
+>   hasn't changed. Enqueued unconditionally from
+>   `jobSearchRepo.startJobSearch` (resume) and `profileRepo.upsertProfile`/
+>   `replaceSkills` (desired_role) — `packages/core/src/profile.ts`'s
+>   `EMBED_PROFILE_QUEUE`. `stopJobSearch` now also purges
+>   `profile_embedding`'s `resume` kind specifically (migration 0014's new
+>   `app_web` grant), leaving `desired_role` intact since it's derived from
+>   retained biography, not search activity. Live-verified against the real
+>   `services/ai` process for both kinds — see
+>   `specs/matching-pipeline.md`'s `embed.profile` section. **Stage 4
+>   (`/v1/match/explain`) is wired too**: `internal/match.RunForAccount`
+>   enqueues `explain.match` for the top 20 matches of each run (real money
+>   per LLM call, so never all of them), `cmd/worker` claims and answers
+>   for real, caching by `(account_id, job_posting_version_id)` per D-09 so
+>   an unchanged version never pays for a second call. Live-verified
+>   through a real Groq call via the same route already verified above —
+>   see `specs/matching-pipeline.md`'s `explain.match` section. Only the
+>   plain chain; Graph B (LangGraph) replacing it is still 5.4.
 > - **A cross-language queue interop test was added and passes**: Go's
 >   `Claim()` running concurrently against a literal copy of `queue.ts`'s
 >   own claim SQL, both racing the same `job_queue` rows — see
 >   `specs/matching-pipeline.md`.
+> - **`go test ./...` is now safe to run as-is.** It wasn't: Go runs each
+>   package's tests as a separate process, in parallel by default, and four
+>   packages here (`session`, `queue`, `match`, `worker`) do broad, unscoped
+>   cleanup against the one shared test Postgres — reproduced as real,
+>   intermittent failures, confirmed to vanish under `-p 1`. Fixed properly
+>   rather than documented as a flag to remember: `internal/testutil.
+>   WithSerializedDBAccess` (a blocking `pg_advisory_lock`) plus a `TestMain`
+>   in each of those four packages, mirroring `packages/db/vitest.config.ts`'s
+>   own `fileParallelism: false` (same problem, TS side) and `apps/
+>   scheduler`'s advisory-lock pattern (this is that pattern's blocking
+>   sibling).
 > - **Not done, not started**: D-32's benchmark artifact, `resume-core`
 >   extraction, `apps/tailor`, Graph A/B (LangGraph), NATS, the SSE bridge,
 >   the dashboard, k8s manifests, multi-arch builds, Gmail integration,
@@ -541,7 +604,7 @@ only describes the candidate, not who they contacted) → retain.*
    > see the status note at the top of this file. `apps/scheduler` runs as
    > `app_ingest`, which cannot safely run this cross-tenant query. The
    > sweep function (`findDormantActiveSessions`) exists and is tested but
-   > is wired to `services/matcher/cmd/worker` instead, once that binary
+   > is wired to `services/backend/cmd/worker` instead, once that binary
    > runs on a schedule.
 
 **Hard delete, no soft-delete.** One honest caveat, named rather than
@@ -854,7 +917,7 @@ equally wrong.
 |---|---|---|---|
 | **5.0 — Infra walking skeleton** | Provision Oracle ARM (confirm Hetzner x86 fallback path works too — forces the multi-arch pipeline regardless, D-30). k3s + Traefik + `local-path-provisioner` + `metrics-server` confirmed. Multi-arch `buildx` proven end-to-end on the **existing** Node image → `ghcr.io`. Postgres `StatefulSet`+PVC, existing migrations applied. Namespaces + base Kustomize structure, even with 3 services, so every later addition is "add a manifest." Ingress routing for existing routes, login tested through real Traefik. Backup `CronJob` + **actual restore test**. | M | Retire infra/arm64/Traefik/cookie-routing risk early and cheap, on synthetic data — not saved for the end where a surprise is expensive. |
 | **5.1 — Provenance + ephemeral retention schema** | `0009` (D-22 + D-31 combined, per the reasoning above). Stop endpoint + purge transaction. Scheduler dormancy sweep. Embedding column + HNSW index added (unpopulated). RLS + purge-correctness tests for every new table. `setResume()`/`CandidateProfile` refactor for the `resume_upload` split. | M | Every downstream feature needs "is there currently a résumé for this account" as a real precondition; must exist before matching/tailoring are built, not retrofitted after. |
-| **5.2 — Go matcher skeleton + non-AI pipeline** | `services/matcher` (3 entrypoints, one image). `app_matcher` grants. Hard-constraint prefilter + cheap filtering (D-32's `EXPLAIN ANALYZE` artifact produced here). `job_match` write path. `matcher-api` deployed to k3s. Structured-signal-only ranking (no embeddings/LLM yet). | L | Ships an end-to-end real match list before any AI dependency — de-risks DB/RLS/grant plumbing in isolation. |
+| **5.2 — Go matcher skeleton + non-AI pipeline** | `services/backend` (3 entrypoints, one image). `app_matcher` grants. Hard-constraint prefilter + cheap filtering (D-32's `EXPLAIN ANALYZE` artifact produced here). `job_match` write path. `matcher-api` deployed to k3s. Structured-signal-only ranking (no embeddings/LLM yet). | L | Ships an end-to-end real match list before any AI dependency — de-risks DB/RLS/grant plumbing in isolation. |
 | **5.3 — `services/ai`: embeddings + plain sequential chain** | `ai` skeleton, `fastembed` integration, **arm64 buildx smoke test done first** (D-30's flagged risk). Embedding retrieval wired into 5.2. Hybrid retrieval (GIN+RRF). Simple sequential LLM chain for explanation — **not LangGraph yet**. | L | Proves the Go↔FastAPI contract and real cost/latency at the simpler baseline before adding graph complexity on top of an unproven foundation. |
 | **5.4 — LangGraph upgrade + resume tailoring** | Replace 5.3's chain with Graph B. `packages/resume-core` extraction (can start in parallel). `apps/tailor` + `resume_source`/`resume_artifact` (D-31-aware). Graph A (full conditional loop) against `resume-core`. | **XL** | The single largest, most novel chunk of new work — new service, new pure-function package, two real graphs. Size it honestly. |
 | **5.5 — Event bus + real-time UI** | NATS deployed. D-26/D-27's event catalog wired from real publishers. SSE bridge + `EventSource`. Streaming tailor/explain variants. `matcher-api` HPA added **here**, once real load-shape data exists to size thresholds against. | M | Deliberately after matcher/ai/tailor work synchronously — don't stand up event plumbing before there's anything real to publish. |

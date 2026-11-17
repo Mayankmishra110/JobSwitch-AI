@@ -1,0 +1,12 @@
+-- 0014 · app_web needs DELETE on profile_embedding for the D-31 purge.
+--
+-- Same shape as job_match/match_explanation's own purge grants (see
+-- specs/ephemeral-retention.md): the RLS DELETE policy
+-- (profile_embedding_tenant_delete, migration 0010) already scopes any
+-- delete to account_id = app_current_account_id(), but RLS and GRANT are
+-- independent checks - a policy with no table-level privilege still
+-- fails with "permission denied," not silently. app_web otherwise only
+-- had SELECT here (a profile page can show "embedding last updated");
+-- this is the one exception, and RLS still confines it to the caller's
+-- own account, same as the job_match/match_explanation precedent.
+GRANT DELETE ON profile_embedding TO app_web;

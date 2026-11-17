@@ -1,6 +1,9 @@
 import {
   AccountId,
+  EMBED_PROFILE_QUEUE,
+  type CandidateFact,
   type CandidateProfile,
+  type EmbedProfilePayload,
   type ExperienceInput,
   type FactProvenance,
   type ProfileExperience,
@@ -9,6 +12,24 @@ import {
   type WorkModePreference,
 } from '@jobswitch/core';
 import type { Queryable } from '../context.js';
+import * as queueRepo from './queue.js';
+
+/**
+ * Queues a desired-role re-embed. Unconditional on every write from both
+ * callers below, deliberately - the actual "is this worth a real AI call"
+ * decision happens once, in services/backend's embed.profile handler,
+ * which compares profile_embedding.source_hash against the freshly-built
+ * text and skips the call when nothing material changed. Keeping that
+ * check in one place (Go, next to the table that owns it) means neither
+ * caller here has to reason about which specific field changes matter.
+ */
+async function enqueueDesiredRoleEmbed(tx: Queryable, accountId: AccountId): Promise<void> {
+  await queueRepo.enqueue(tx, {
+    queue: EMBED_PROFILE_QUEUE,
+    payload: { accountId, kind: 'desired_role' } satisfies EmbedProfilePayload,
+    dedupKey: `${EMBED_PROFILE_QUEUE}:${accountId}:desired_role`,
+  });
+}
 
 /**
  * Personal profile repository - Layer 2 (ADR §L2, Phase 4).
@@ -190,6 +211,9 @@ export async function upsertProfile(
   );
   const row = rows[0];
   if (!row) throw new Error('candidate_profile upsert returned no row');
+
+  await enqueueDesiredRoleEmbed(tx, accountId);
+
   return toProfile(row);
 }
 
@@ -257,6 +281,8 @@ export async function replaceSkills(
   }
 
   await tx.query('DELETE FROM profile_skill WHERE account_id = $1', [accountId]);
+
+  await enqueueDesiredRoleEmbed(tx, accountId);
 
   if (deduped.length === 0) return [];
 
@@ -409,4 +435,53 @@ export async function deleteExperience(
     [accountId, experienceId],
   );
   return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Assemble the provenance-tagged facts an LLM boundary is allowed to see
+ * about this candidate - mirrors services/backend's
+ * internal/worker/explain.go's explanationFacts() field-for-field, so a
+ * match explanation (Go caller) and a resume tailoring request (this, TS
+ * caller) describe the same candidate the same way. desiredTitles has no
+ * per-row provenance column because it is always 'preference' by
+ * definition (candidate_profile's own documented invariant, migration
+ * 0009) - hardcoding that value here is not a guess.
+ */
+export async function buildCandidateFacts(
+  tx: Queryable,
+  accountId: AccountId,
+): Promise<CandidateFact[]> {
+  const [profile, skills] = await Promise.all([
+    getProfile(tx, accountId),
+    listSkills(tx, accountId),
+  ]);
+
+  const facts: CandidateFact[] = [];
+
+  if (profile?.currentTitle) {
+    facts.push({
+      ref: 'current_title',
+      text: profile.currentTitle,
+      provenance: profile.currentTitleProvenance,
+    });
+  }
+  if (profile?.yearsExperience != null) {
+    facts.push({
+      ref: 'years_experience',
+      text: `${profile.yearsExperience} years of experience`,
+      provenance: profile.yearsExperienceProvenance,
+    });
+  }
+  if (profile?.desiredTitles.length) {
+    facts.push({
+      ref: 'desired_titles',
+      text: profile.desiredTitles.join(', '),
+      provenance: 'preference',
+    });
+  }
+  for (const s of skills) {
+    facts.push({ ref: `skill:${s.skill}`, text: s.skill, provenance: s.provenance });
+  }
+
+  return facts;
 }

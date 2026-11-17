@@ -89,11 +89,24 @@ of `ingest.source:<sourceId>:<currentHour>` as a second, independent guard.
 
 `apps/worker`: a generic `Worker` class taking a `{queueName: handler}`
 map — currently just `{'ingest.source': handleIngestSource}`. This design
-is why `services/matcher`'s eventual worker can share the exact same
-`job_queue` table with new queue names (`embed.job_version`,
-`match.account`, ...) and no coordination beyond that — see
+is why `services/backend`'s worker can share the exact same `job_queue`
+table with new queue names and no coordination beyond that — see
 `specs/architecture.md`'s note on the two-pool design and
 `specs/matching-pipeline.md`.
+
+`packages/ingest/src/run.ts`'s `runIngestion` is also a **producer** onto
+one of those other queue names: inside the same transaction as
+`jobsRepo.upsertPosting`, whenever a version is newly created or its
+content changed, it enqueues `embed.job_version` (`{ versionId }`,
+`run.ts`'s `EMBED_JOB_VERSION_QUEUE`/`EmbedJobVersionPayload`) — the queue
+`services/backend/cmd/worker`'s `HandleEmbedJobVersion` claims from (see
+`specs/matching-pipeline.md`). Same transaction means a rolled-back run
+never leaves an orphan embed job behind; the dedup key is the version id
+itself, so a re-run within the same hour costs nothing extra. This is a
+cross-language contract enforced only by both sides agreeing on the queue
+name string and the `{versionId: string}` JSON shape — there is no shared
+type between the two languages, the same way `ingest.source`'s payload
+shape already wasn't shared before this.
 
 ## Seed data
 
@@ -108,5 +121,5 @@ and degrades the source after three attempts (loud failure, not silent).
 |---|---|---|
 | vitest | `packages/ingest/test/normalize.test.ts` (27) | Title/location/HTML/fingerprint utilities |
 | vitest | `packages/ingest/test/{greenhouse,lever,ashby}.test.ts` (27+27+28) | Each adapter's detect/fetch/normalize against its synthetic fixture |
-| vitest | `packages/ingest/test/run.test.ts` (23) | Full pipeline against real Postgres: upsert, versioning, grouping, absence handling |
+| vitest | `packages/ingest/test/run.test.ts` (26) | Full pipeline against real Postgres: upsert, versioning, grouping, absence handling, and (**embedding enqueue**) that a new/changed version enqueues exactly one `embed.job_version` job, an unchanged re-run enqueues nothing, and a content change enqueues again for the new version only |
 | vitest | `packages/db/test/queue.test.ts` (16) | Claim/complete/fail/dead-letter/dedup/visibility-timeout semantics |

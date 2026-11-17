@@ -1,0 +1,216 @@
+\documentclass[letterpaper,10pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+
+\definecolor{myskyblue}{RGB}{0,102,204}
+\definecolor{darknavy}{RGB}{78,159,229}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=myskyblue,
+    urlcolor=myskyblue,
+    citecolor=myskyblue
+}
+
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\usepackage{multicol}
+\setlength{\multicolsep}{-2.0pt}
+\setlength{\columnsep}{-3pt}
+\input{glyphtounicode}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+\addtolength{\oddsidemargin}{-0.65in}
+\addtolength{\evensidemargin}{-0.65in}
+\addtolength{\textwidth}{1.3in}
+\addtolength{\topmargin}{-.75in}
+\addtolength{\textheight}{1.6in}
+
+\urlstyle{same}
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+\titleformat{\section}{
+  \vspace{-5pt}\scshape\raggedright\large\bfseries\color{darknavy}
+}{}{0em}{}[\color{darknavy}\titlerule \vspace{-6pt}]
+
+\pdfgentounicode=1
+
+\newcommand{\resumeItem}[1]{
+  \item\normalsize{#1 \vspace{-3pt}}
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & \normalsize #2 \\
+      \textbf{\normalsize#3} & \normalsize #4 \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectLine}[1]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \normalsize#1 & \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.0in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}[leftmargin=0.15in]}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+\renewcommand\labelitemi{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+%-----------------------------------------------------------------------------
+
+\begin{document}
+
+%-------------------- HEADER --------------------
+\begin{center}
+    {\fontsize{18}{19}\selectfont \scshape Mayank Kumar Mishra} \\ \vspace{1pt}
+    \normalsize
+    +91-8987551030 \hspace{0.8cm}
+    \href{mailto:kmmay15@gmail.com}{\underline{kmmay15@gmail.com}} \hspace{0.8cm}
+    \href{https://linkedin.com/in/mayankmishracse}{\underline{linkedin/mayankmishracse}} \hspace{0.8cm}
+    \href{https://github.com/Mayankmishra110}{\underline{github/Mayankmishra110}}
+\end{center}
+\vspace{-16pt}
+
+%-------------------- SUMMARY --------------------
+\section{Professional Summary}
+\vspace{1pt}
+\normalsize{Full Stack Software Engineer with 2+ years shipping production B2B and B2C platforms end-to-end --- multi-role SaaS dashboards, real-time AI pipelines, Redis-backed APIs, Stripe billing, and cross-platform mobile releases. Promoted to Senior Engineer in 15 months. Established frontend and backend engineering standards adopted org-wide. Endorsed by WebKnot's Founder for engineering ownership and delivery quality.}
+
+%-------------------- SKILLS --------------------
+\vspace{-5pt}
+\section{Skills}
+\vspace{-20pt}
+\hfill\href{https://leetcode.com/u/mayank110/}{\underline{leetcode.com/u/mayank110 \ (500+ solved)}}
+\begin{itemize}[leftmargin=0.15in, label={}]
+\normalsize{\item{
+\textbf{Frontend}{: JavaScript (ES6+), TypeScript, React.js, Next.js (App Router \& Pages Router), Redux Toolkit, React Query, Tailwind CSS} \\
+\vspace{2pt}
+\textbf{Backend}{: Java, Spring Boot, Hibernate (JPA), Node.js, NestJS, REST API design, JWT, RBAC, OAuth2, Stripe, LiveKit, SSE} \\
+\vspace{2pt}
+\textbf{Database \& Cache}{: PostgreSQL, Redis, schema design, composite index design, SQL optimisation, Flyway, Prisma, Hibernate ORM} \\
+\vspace{2pt}
+\textbf{Testing \& Tooling}{: Jest, RTL, MSW, JUnit 5, Mockito, SonarQube, Husky, ESLint, GitHub Actions CI/CD} \\
+\vspace{2pt}
+\textbf{DevOps \& Platform}{: Docker, AWS (EC2, RDS, S3), Turborepo, PWA, Capacitor (iOS \& Android), Electron.js, Linux} \\
+\vspace{2pt}
+\textbf{CS Fundamentals}{: Data Structures \& Algorithms, OOP, DBMS, OS, Computer Networks, System Design} \\
+}}
+\end{itemize}
+\vspace{-15pt}
+
+%-------------------- EXPERIENCE --------------------
+\section{Experience}
+\resumeSubHeadingListStart
+\vspace{2pt}
+
+%======== WebKnot Technologies ========
+\resumeSubheading
+  {Senior Software Engineer (Progressed from Intern)}{Jul 2024 -- Present}
+  {WebKnot Technologies Pvt Ltd}{Bengaluru}
+
+\vspace{-2pt}
+
+%-------- Career Connect --------
+\resumeSubHeadingListStart
+  \resumeProjectLine{{\textbf{Career Connect}} \textbar\ \normalfont Next.js, Spring Boot, PostgreSQL, Redis, Hibernate, JWT, React Query, Redux Toolkit, Jest, RTL, MSW}
+\resumeSubHeadingListEnd
+
+\vspace{-3pt}
+\resumeItemListStart
+  \resumeItem{Architected a \textbf{multi-role B2B SaaS platform end-to-end} --- four role-specific Next.js portals and a Spring Boot API layer with RBAC via Spring Security and JWT claims, scaling to \textbf{50K+ users} with zero structural rework for new role onboarding.}
+  \resumeItem{Owned the full-stack data layer --- normalized PostgreSQL schemas with composite indexes and cursor-based pagination on the backend; reduced average query latency by \textbf{$\sim$40\%} on high-traffic endpoints. Introduced \textbf{Redis caching} on hot read paths, cutting p95 response times from $\sim$300ms to $\sim$80ms.}
+  \resumeItem{Designed React Query patterns for cache normalization, optimistic updates, and failure recovery on the frontend; co-defined API contracts before implementation, eliminating cross-device state inconsistency and reducing redundant API calls by \textbf{45\%}.}
+  \resumeItem{Established org-wide engineering standards --- Jest + RTL + MSW frontend tests, JUnit 5 + Mockito backend coverage, SonarQube quality gates, and Husky pre-commit hooks. Recognized as \textbf{Impactor of the Quarter}.}
+\resumeItemListEnd
+
+\vspace{1pt}
+
+%-------- PrepMeToWork --------
+\resumeSubHeadingListStart
+  \resumeProjectLine{{\textbf{PrepMeToWork}} \textbar\ \normalfont Next.js, Spring Boot, PostgreSQL, Redis, Stripe, LiveKit, Docker, AWS, Capacitor \textbar\ \textit{Play Store + App Store}}
+\resumeSubHeadingListEnd
+
+\vspace{-4pt}
+\resumeItemListStart
+  \resumeItem{Delivered a \textbf{monetized B2C AI interview prep platform end-to-end} --- Spring Boot backend with Stripe subscription billing, idempotent webhook handlers keyed by event ID, and OAuth2 social sign-in (Google/Apple); Next.js frontend with role-based dashboards and admin-controlled pricing tiers.}
+  \resumeItem{Shipped an \textbf{AI-powered live interview engine} --- real-time audio/video via LiveKit, Spring Boot async workers for streaming token-by-token AI inference, Redis session caching reducing per-request latency by \textbf{$\sim$65\%} on live session endpoints.}
+  \resumeItem{Eliminated parallel native development overhead by \textbf{50\%} --- packaged single Next.js PWA for Play Store and App Store via Capacitor; containerized backend with Docker, deployed to AWS EC2 with RDS PostgreSQL via GitHub Actions CI/CD.}
+\resumeItemListEnd
+
+\resumeSubHeadingListEnd
+\vspace{-5pt}
+
+%======== Built Design ========
+\resumeSubHeadingListStart
+\resumeSubheading
+  {Software Developer Intern}{Feb 2024 -- Jun 2024}
+  {Expedian BuiltDesign Pvt Ltd}{Remote}
+\vspace{-2pt}
+\resumeSubHeadingListStart
+  \resumeProjectLine{{\textbf{Omron Monitoring System}} \textbar\ \normalfont React.js, TypeScript, Spring Boot, Redux Toolkit, WebSocket, REST APIs}
+\resumeSubHeadingListEnd
+\vspace{-4pt}
+\resumeItemListStart
+  \resumeItem{\textbf{Led a 4-person full-stack delivery stream} for an industrial IoT sensor dashboard --- owned task decomposition, code reviews, and milestone execution across React.js and Spring Boot layers, shipping \textbf{ahead of committed timelines}.}
+  \resumeItem{Eliminated scattered validation logic --- built Spring Boot middleware for API input validation and custom React hooks for field-level error handling, reducing duplication by \textbf{$\sim$60\%} across both layers.}
+  \resumeItem{Optimized real-time telemetry --- introduced shared WebSocket lifecycle management for live sensor streams and threshold alerts, reducing redundant subscriptions across components.}
+\resumeItemListEnd
+\resumeSubHeadingListEnd
+\vspace{-5pt}
+
+%======== Freelance ========
+\resumeSubHeadingListStart
+\resumeSubheading
+  {Independent Software Consultant}{Jun 2023 -- Jun 2024}
+  {Self-Employed --- KAVACH AI}{Remote}
+\vspace{1pt}
+\resumeSubHeadingListStart
+  \resumeProjectLine{{\textbf{KAVACH AI}} \textbar\ \normalfont Spring Boot, PostgreSQL, Redis, Next.js, Electron.js, SSE, Turborepo \textbar\ \href{https://kavach-core-web-appss.vercel.app/}{\underline{Live}} \textbar\ \textit{Sold to paying B2B clients}}
+\resumeSubHeadingListEnd
+\vspace{-2pt}
+\resumeItemListStart
+  \resumeItem{Architected and sold a \textbf{multi-tenant B2B parental monitoring platform} --- Spring Boot APIs with tenant-isolated PostgreSQL schemas and JWT-issued \texttt{TenantContext} propagated through every service layer; Next.js dashboard + Electron enforcement agent for cross-device policy control.}
+  \resumeItem{Chose \textbf{SSE over WebSockets} for real-time policy push --- eliminated full-duplex overhead while retaining automatic HTTP reconnect and standard reverse-proxy compatibility. Redis caching on tenant policy reads reduced DB load by \textbf{$\sim$70\%} on enforcement hot paths.}
+  \resumeItem{Designed \textbf{Turborepo monorepo} spanning four app surfaces with shared packages --- reduced feature duplication and accelerated cross-platform delivery as the platform scaled.}
+\resumeItemListEnd
+\resumeSubHeadingListEnd
+\vspace{-12pt}
+
+%-------------------- EDUCATION --------------------
+\section{Education}
+\resumeSubHeadingListStart
+\resumeSubheading
+  {North Eastern Regional Institute of Science and Technology}{Jul 2018 -- Jun 2022}
+  {\normalfont B.Tech in Computer Science and Engineering}{Itanagar, Arunachal Pradesh}
+\resumeSubHeadingListEnd
+\vspace{-9pt}
+
+%-------------------- ACCOMPLISHMENTS --------------------
+\section{Accomplishments}
+\resumeItemListStart
+  \resumeItem{\textbf{Performance Awards (2024--26):} Spot Award, Fantastic Five, and Impactor of the Quarter at WebKnot Technologies for high-impact engineering delivery. \href{https://drive.google.com/drive/folders/1b31Splf6_z8zsI4cy17kcNF-3EIpSdGw?usp=sharing}{\underline{View Awards}}}
+  \resumeItem{\textbf{Founder Recommendation:} Endorsed directly by the Founder of WebKnot Technologies on LinkedIn for engineering ownership and delivery quality. \href{https://www.linkedin.com/in/mayankmishracse/details/recommendations/}{\underline{View}}}
+  \resumeItem{\textbf{100xDevs Full Stack Cohort:} Completed intensive program covering React.js, Next.js, Spring Boot, Java, TypeScript, system design, and databases.}
+\resumeItemListEnd
+
+\end{document}

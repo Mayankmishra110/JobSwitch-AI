@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { Errors, startJobSearchInput } from '@jobswitch/core';
+import { Errors, Events, startJobSearchInput, type JobSearchStoppedPayload } from '@jobswitch/core';
 import { jobSearchRepo, withAccount } from '@jobswitch/db';
 
 /**
@@ -10,7 +10,7 @@ import { jobSearchRepo, withAccount } from '@jobswitch/db';
  * for why that has to be true for "boom, gone" to be an honest claim.
  */
 export async function registerJobSearchRoutes(app: FastifyInstance): Promise<void> {
-  const { pool } = app.authDeps;
+  const { pool, events } = app.authDeps;
 
   app.get('/api/v1/job-search/status', { preHandler: app.requireAuth }, async (request) => {
     const principal = request.principal;
@@ -54,6 +54,18 @@ export async function registerJobSearchRoutes(app: FastifyInstance): Promise<voi
       jobSearchRepo.stopJobSearch(tx, principal.accountId, 'user_action'),
     );
     if (!result) throw Errors.notFound('An active job search');
+
+    // AFTER the purge transaction commits, never before (D-26's own rule
+    // for this exact event) - "boom, gone" is a claim about *when*, and
+    // this event existing at all is a signal that the purge already
+    // happened. Best-effort: a NATS hiccup must not turn an already-
+    // committed, successful purge into a 500 for the caller.
+    void events
+      .publish(principal.accountId, Events.JOB_SEARCH_STOPPED, {
+        accountId: principal.accountId,
+        purgedTables: result.purgedTables,
+      } satisfies JobSearchStoppedPayload)
+      .catch((error) => request.log.error({ err: error }, 'publishing job_search.stopped failed'));
 
     return { session: result.session, purgedTables: result.purgedTables };
   });

@@ -16,7 +16,7 @@ only describes the candidate, not who they contacted) → retain.*
 
 | Purges | Retains |
 |---|---|
-| `resume_upload`, `resume_source`, `resume_artifact`, `job_application`, `job_match`, `match_explanation` (and `outreach_draft`, once it exists — Phase 5.4/Wave C) | `candidate_profile`, `profile_skill`, `profile_experience` (the candidate's own biography, not "search activity via this product"), `job_search_session` itself (metadata *about* the search, needed for "resume later" to mean anything) |
+| `resume_upload`, `resume_source`, `resume_artifact`, `job_application`, `job_match`, `match_explanation`, `profile_embedding`'s **`resume`** kind only (and `outreach_draft`, once it exists — Phase 5.4/Wave C) | `candidate_profile`, `profile_skill`, `profile_experience` (the candidate's own biography, not "search activity via this product"), `profile_embedding`'s **`desired_role`** kind (derived from that same retained biography), `job_search_session` itself (metadata *about* the search, needed for "resume later" to mean anything) |
 
 `jd_extraction` is unaffected either way — Layer-1-shared, keyed by
 `job_posting_version`, not personal data, entirely outside this mechanic.
@@ -61,17 +61,32 @@ Two, for different failure modes — not redundant:
    volume (one account, ~6 tables) is trivially small — async buys
    nothing.
 
-2. **Scheduled sweep (safety net, NOT YET WIRED)**:
-   `jobSearchRepo.findDormantActiveSessions(tx, staleDays)` exists and is
-   tested, but nothing calls it on a schedule. This is deliberate, not an
-   oversight: finding every dormant session is a cross-tenant query by
-   nature, which only returns correct results under a `BYPASSRLS` role
-   with no tenant context set. `apps/scheduler` connects as `app_ingest`,
-   which has zero grant on tenant tables by design and must stay that way.
-   The sweep becomes real once `services/matcher/cmd/worker` exists
-   (Phase 5.2's worker binary, not yet built) — one more per-account task
-   in its BYPASSRLS batch loop, the same role and pattern already built
-   for exactly this shape of job.
+2. **Scheduled sweep (safety net, built Phase 5.3)**: lives in
+   `services/backend/cmd/worker`, not `apps/scheduler` — finding every
+   dormant session is a cross-tenant query by nature, which only returns
+   correct results under a `BYPASSRLS` role with no tenant context set,
+   and `apps/scheduler` connects as `app_ingest`, which has zero grant on
+   tenant tables by design and must stay that way. `internal/worker/
+   schedule.go`'s `RunScheduledTasks` runs as a goroutine alongside
+   `cmd/worker`'s queue-claim loop, guarded by its own session-scoped
+   advisory lock (`scheduledTasksAdvisoryLock`, distinct from `apps/
+   scheduler`'s own lock id — a second replica that fails to acquire it
+   returns immediately rather than exiting the process, since this
+   binary's primary job, claiming from `job_queue`, must keep running
+   regardless). Each tick (`MATCH_TICK_MS`, default 5 minutes):
+   `repo.ActiveJobSearchAccountIDs` → `match.RunForAccount` per account,
+   then `repo.FindDormantActiveSessions(staleDays)` (Go port of
+   `jobSearch.ts`'s own query — same WHERE clause) →
+   `repo.SweepDormantSession` per dormant account, which stops the session
+   (`stop_reason = 'scheduled_sweep_inactivity'`) and hard-deletes the same
+   purge tables `stopJobSearch` does, including the kind-scoped
+   `profile_embedding` delete, all in one transaction. Needed its own
+   grants — `app_matcher` had never touched `job_search_session`, and only
+   had `SELECT` (not `DELETE`) on several purge tables; migrations `0015`
+   and `0016` close that gap (`0016` specifically because Postgres requires
+   `SELECT` on any column a `DELETE`'s `WHERE` clause reads, which `0015`
+   missed for `resume_source`/`resume_artifact` — caught by the
+   integration test actually running the sweep, not by inspection).
 
 ## `PURGE_TABLES` — a list that must grow with the schema
 
@@ -97,6 +112,23 @@ table-level `GRANT DELETE` — `app_web` otherwise only has `UPDATE
 The DELETE grant is the one exception, and RLS still confines it to the
 caller's own account — not a broadened blanket grant.
 
+**`profile_embedding` is deliberately NOT in `PURGE_TABLES`**, even though
+its `resume` kind purges on every stop (Phase 5.3, closing the gap this
+section used to flag: "wiring it is Phase 5.3 work, done alongside the
+embedding worker that populates it"). Every `PURGE_TABLES` entry is a
+blanket `DELETE FROM table WHERE account_id = $1`; `profile_embedding`
+can't use that shape because its `desired_role` kind is derived from
+`candidate_profile`/`profile_skill` — retained biography, not search
+content — and must survive a stop exactly like those tables do. So
+`jobSearchRepo.stopJobSearch` runs one more, kind-scoped statement right
+after the loop: `DELETE FROM profile_embedding WHERE account_id = $1 AND
+kind = 'resume'`, and reports `'profile_embedding'` in `purgedTables`
+alongside everything else. This needed its own grant too — migration 0014
+gives `app_web` `DELETE` on `profile_embedding` (the RLS policy already
+existed from migration 0010; a policy with no table-level privilege still
+fails closed, the same lesson `job_match`/`match_explanation`'s grants
+above already encode).
+
 ## Hard delete, no soft delete — one named caveat
 
 A purged résumé can still exist in a pre-purge Postgres backup snapshot for
@@ -118,5 +150,6 @@ GET  /api/v1/job-search/status  -> { active, session, resume }
 
 | Suite | File | Proves |
 |---|---|---|
-| vitest | `packages/db/test/jobSearch.test.ts` (9) | RLS isolation; the purge actually deletes rows (verified via the RLS-bypassing owner pool, not just "the app can't see it"); `candidate_profile`/`profile_skill`/`profile_experience` explicitly survive a purge; dormancy detection at a backdated `started_at` |
+| vitest | `packages/db/test/jobSearch.test.ts` (10) | RLS isolation; the purge actually deletes rows (verified via the RLS-bypassing owner pool, not just "the app can't see it"); `candidate_profile`/`profile_skill`/`profile_experience` **and `profile_embedding`'s `desired_role` kind** explicitly survive a purge while its `resume` kind is deleted; dormancy detection at a backdated `started_at`; `startJobSearch` enqueues exactly one `embed.profile` (kind `resume`) job even across a repeated "already active" call |
 | vitest | `apps/web/test/jobSearch.test.ts` (7) | Route wiring, 404 on stop-with-nothing-active, cross-tenant isolation at the route layer |
+| go test | `services/backend/internal/worker/schedule_test.go` | `FindDormantActiveSessions`/`SweepDormantSession` against real Postgres: dormant vs. fresh vs. already-stopped sessions correctly distinguished, purge tables actually emptied while `candidate_profile` and `profile_embedding`'s `desired_role` kind survive, a second sweep of an already-stopped session is a benign no-op; `RunScheduledTasks` yields immediately when another instance already holds its advisory lock |

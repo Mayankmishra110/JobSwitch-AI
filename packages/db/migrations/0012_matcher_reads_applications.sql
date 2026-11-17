@@ -1,7 +1,7 @@
 -- 0012 · app_matcher needs to read job_application (Phase 5.2).
 --
 -- Found by testing, not by review: the Stage 1 hard-constraint prefilter
--- (services/matcher/internal/repo's PrefilterCandidates) excludes any
+-- (services/backend/internal/repo's PrefilterCandidates) excludes any
 -- posting the candidate already tracks as an application - the same
 -- "never re-surface what's already handled" rule job_match's own dismissed
 -- exclusion follows. That query's NOT EXISTS against job_application

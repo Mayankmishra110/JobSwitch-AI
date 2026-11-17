@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 from ..auth import require_internal_token
 from ..config import Settings, get_settings
-from ..explain_service import draft_explanation
+from ..graphs.explain_graph import run_explain_graph
 from ..llm import LLMClient, LLMConfigError, LLMResponseError, resolve_llm_client
 from ..models import ExplainRequest, ExplainResponse
 
@@ -50,7 +50,11 @@ async def explain(
     llm: Annotated[LLMClient, Depends(get_llm_client)],
 ) -> ExplainResponse:
     try:
-        return await draft_explanation(llm, req.job, req.facts)
+        # Graph B (LangGraph) - see app/graphs/explain_graph.py. Same
+        # request/response contract as the plain chain it replaces
+        # (app/explain_service.py, kept in the repo as the documented
+        # baseline); services/backend's Go client needs zero changes.
+        return await run_explain_graph(llm, req.job, req.facts)
     except (LLMResponseError, ValidationError) as error:
         # Both mean the same thing from a caller's perspective: the
         # provider replied, but not with something we can trust - never

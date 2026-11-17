@@ -56,7 +56,7 @@ edit has to be able to say *which kind* of fact it used. "Matched on 4
 years Python (verified from your resume)" and "matched on 4 years Python
 (the model guessed)" are different claims, and this product's premise —
 matching that explains itself — depends on being able to tell the
-candidate which one it's making. `services/matcher`'s repository layer
+candidate which one it's making. `services/backend`'s repository layer
 (`specs/matching-pipeline.md`) reads these columns but doesn't yet *use*
 provenance in scoring — that's Phase 5.4 territory, once explanations
 exist to cite it.
@@ -95,5 +95,5 @@ DELETE /api/v1/profile/experience/:id         remove; malformed/absent id -> 404
 
 | Suite | File | Proves |
 |---|---|---|
-| vitest | `packages/db/test/profile.test.ts` (16) | RLS isolation, upsert semantics, DB-constraint defense-in-depth (e.g. `ai_inference` requiring `confidence`) |
+| vitest | `packages/db/test/profile.test.ts` (18) | RLS isolation, upsert semantics, DB-constraint defense-in-depth (e.g. `ai_inference` requiring `confidence`); `upsertProfile` and `replaceSkills` each enqueue `embed.profile` (kind `desired_role`), deduped across repeated writes - see `specs/matching-pipeline.md` |
 | vitest | `apps/web/test/profile.test.ts` (13) | Route wiring, validation, 404 handling, cross-tenant isolation at the route layer |

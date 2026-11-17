@@ -7,6 +7,10 @@ import { AppError, type Principal } from '@jobswitch/core';
 import { createPool, type Pool } from '@jobswitch/db';
 import { type Config, isProduction } from './config.js';
 import { createLogMailer, createNoopMailer, type Mailer } from './services/mailer.js';
+import { createEventBus, type EventBus } from './services/events.js';
+import { createAIClient, type AIClient } from './services/aiClient.js';
+import { createTailorClient, type TailorHttpClient } from './services/tailorClient.js';
+import { runNotificationSubscriber } from './services/notifications.js';
 import type { AuthDeps } from './services/auth.js';
 import { resolveSession } from './services/auth.js';
 import { registerAuthRoutes } from './routes/auth.js';
@@ -14,6 +18,11 @@ import { registerHealthRoutes } from './routes/health.js';
 import { registerAppRoutes } from './routes/app.js';
 import { registerProfileRoutes } from './routes/profile.js';
 import { registerJobSearchRoutes } from './routes/jobSearch.js';
+import { registerEventRoutes } from './routes/events.js';
+import { registerMatchRoutes } from './routes/matches.js';
+import { registerApplicationRoutes } from './routes/applications.js';
+import { registerArtifactRoutes } from './routes/artifacts.js';
+import { registerOutreachRoutes } from './routes/outreach.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -38,6 +47,9 @@ export interface BuildOptions {
   config: Config;
   pool?: Pool;
   mailer?: Mailer;
+  events?: EventBus;
+  aiClient?: AIClient;
+  tailorClient?: TailorHttpClient;
 }
 
 export async function buildServer(
@@ -80,7 +92,11 @@ export async function buildServer(
       ? createLogMailer(app.log)
       : createNoopMailer());
 
-  app.decorate('authDeps', { pool, config, mailer } satisfies AuthDeps);
+  const events = options.events ?? createEventBus(config.NATS_URL);
+  const aiClient = options.aiClient ?? createAIClient(config);
+  const tailorClient = options.tailorClient ?? createTailorClient(config);
+
+  app.decorate('authDeps', { pool, config, mailer, events, aiClient, tailorClient } satisfies AuthDeps);
   app.decorateRequest('principal', null);
 
   await app.register(helmet, {
@@ -184,12 +200,47 @@ export async function buildServer(
   await registerAppRoutes(app);
   await registerProfileRoutes(app);
   await registerJobSearchRoutes(app);
+  await registerEventRoutes(app);
+  await registerMatchRoutes(app);
+  await registerApplicationRoutes(app);
+  await registerArtifactRoutes(app);
+  await registerOutreachRoutes(app);
 
   // Close the pool with the server, but only if we created it - a pool passed
   // in by a test is that test's to manage.
   if (!options.pool) {
     app.addHook('onClose', async () => {
       await pool.end();
+    });
+  }
+  // Same reasoning for the event bus - a caller-supplied one (tests
+  // sharing a single connection across server instances) is theirs to
+  // close, not this server's.
+  if (!options.events) {
+    app.addHook('onClose', async () => {
+      await events.close();
+    });
+  }
+
+  // Phase 8: cross-account, process-wide - explicitly opt-in
+  // (NOTIFICATIONS_ENABLED), never started implicitly just because a test
+  // or a dev server happened to also configure NATS. Runs until this
+  // server closes; the abort controller is what lets subscribeEvent's
+  // blocked `for await` loops actually unblock and exit on shutdown,
+  // rather than leaking two live NATS subscriptions per server instance.
+  if (config.NOTIFICATIONS_ENABLED) {
+    const notificationsAbort = new AbortController();
+    const notificationsDone = runNotificationSubscriber(
+      pool,
+      mailer,
+      config,
+      events,
+      notificationsAbort.signal,
+      (context, error) => app.log.error({ err: error }, context),
+    );
+    app.addHook('onClose', async () => {
+      notificationsAbort.abort();
+      await notificationsDone;
     });
   }
 

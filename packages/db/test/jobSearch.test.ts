@@ -44,9 +44,11 @@ beforeAll(async () => {
 
   webPool = createPool({ connectionString: WEB_URL, max: 4 });
 
+  await ownerPool.query(`DELETE FROM job_queue WHERE queue = 'embed.profile'`);
   await ownerPool.query('DELETE FROM job_application');
   await ownerPool.query('DELETE FROM resume_artifact');
   await ownerPool.query('DELETE FROM resume_source');
+  await ownerPool.query('DELETE FROM profile_embedding');
   await ownerPool.query('DELETE FROM resume_upload');
   await ownerPool.query('DELETE FROM job_search_session');
   // Layer 1 fixture from the purge test below - not tenant data, so it is
@@ -147,6 +149,36 @@ describe('startJobSearch / stopJobSearch behaviour', () => {
     expect(second.resume.rawText).toBe('Updated draft.');
   });
 
+  it('enqueues embed.profile (kind resume) when a resume is uploaded, deduped across repeats', async () => {
+    const created = await withoutTenantContext(ownerPool, (tx) =>
+      identityRepo.createUserWithAccount(tx, {
+        email: 'jobsearch-embed-enqueue@example.com',
+        fullName: 'Embed Enqueue',
+      }),
+    );
+    const accountId = created.accountId;
+
+    await withAccount(webPool, accountId, (tx) =>
+      jobSearchRepo.startJobSearch(tx, accountId, { filename: 'v1.pdf', rawText: 'First draft.' }),
+    );
+    // Re-starting while active updates the same resume - the dedup key
+    // (embed.profile:<accountId>:resume) must collapse this into the same
+    // still-pending job, not a second one; the handler reads resume_upload
+    // fresh at claim time, so one pending job is all "re-embed the latest
+    // text" ever needs.
+    await withAccount(webPool, accountId, (tx) =>
+      jobSearchRepo.startJobSearch(tx, accountId, { filename: 'v2.pdf', rawText: 'Updated draft.' }),
+    );
+
+    const { rows } = await ownerPool.query<{ payload: { accountId: string; kind: string } }>(
+      `SELECT payload FROM job_queue WHERE queue = 'embed.profile'
+       AND payload ->> 'accountId' = $1`,
+      [accountId],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.payload.kind).toBe('resume');
+  });
+
   it('stopping with no active session returns null', async () => {
     await withAccount(webPool, accountB, async (tx) => {
       const existing = await jobSearchRepo.getActiveSession(tx, accountB);
@@ -209,6 +241,13 @@ describe('startJobSearch / stopJobSearch behaviour', () => {
         [purgeeId, applicationId],
       ),
     );
+    await withAccount(webPool, purgeeId, (tx) =>
+      tx.query(
+        `INSERT INTO outreach_draft (account_id, application_id, to_email, subject, body)
+         VALUES ($1, $2, 'recruiter@example.com', 'Interested', 'Hi there.')`,
+        [purgeeId, applicationId],
+      ),
+    );
 
     // job_match/match_explanation are app_matcher-owned (BYPASSRLS), so
     // seed them via the owner pool - exercising a real row in each, not
@@ -254,6 +293,17 @@ describe('startJobSearch / stopJobSearch behaviour', () => {
        VALUES ($1, $2, 'Good fit.', '[]'::jsonb, 'test-model', 1)`,
       [purgeeId, versionId],
     );
+    // profile_embedding is app_matcher-owned (BYPASSRLS), same reasoning as
+    // job_match/match_explanation above - seed both kinds via the owner
+    // pool so the purge's kind-scoping is exercised against a real row of
+    // each, not just trusted from the table name.
+    await ownerPool.query(
+      `INSERT INTO profile_embedding (account_id, kind, embedding, source_hash, embedding_model)
+       VALUES
+         ($1, 'resume', array_fill(0::real, ARRAY[384])::vector, 'test-hash', 'test-model'),
+         ($1, 'desired_role', array_fill(0::real, ARRAY[384])::vector, 'test-hash', 'test-model')`,
+      [purgeeId],
+    );
 
     const result = await withAccount(webPool, purgeeId, (tx) =>
       jobSearchRepo.stopJobSearch(tx, purgeeId, 'user_action'),
@@ -265,6 +315,8 @@ describe('startJobSearch / stopJobSearch behaviour', () => {
         'job_application',
         'job_match',
         'match_explanation',
+        'outreach_draft',
+        'profile_embedding',
         'resume_artifact',
         'resume_source',
         'resume_upload',
@@ -278,13 +330,24 @@ describe('startJobSearch / stopJobSearch behaviour', () => {
          (SELECT count(*) FROM resume_upload WHERE account_id = $1) +
          (SELECT count(*) FROM resume_source WHERE account_id = $1) +
          (SELECT count(*) FROM resume_artifact WHERE account_id = $1) +
+         (SELECT count(*) FROM outreach_draft WHERE account_id = $1) +
          (SELECT count(*) FROM job_application WHERE account_id = $1) +
          (SELECT count(*) FROM job_match WHERE account_id = $1) +
-         (SELECT count(*) FROM match_explanation WHERE account_id = $1)
+         (SELECT count(*) FROM match_explanation WHERE account_id = $1) +
+         (SELECT count(*) FROM profile_embedding WHERE account_id = $1 AND kind = 'resume')
          AS c`,
       [purgeeId],
     );
     expect(Number(remaining.rows[0]?.c)).toBe(0);
+
+    // The 'desired_role' embedding is NOT search activity - it's derived
+    // from candidate_profile/profile_skill, which this same purge leaves
+    // alone - so it must survive exactly like those tables do.
+    const desiredRoleSurvives = await ownerPool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM profile_embedding WHERE account_id = $1 AND kind = 'desired_role'`,
+      [purgeeId],
+    );
+    expect(desiredRoleSurvives.rows[0]?.c).toBe(1);
 
     // The session row itself survives, stopped - it's metadata about the
     // search, not search content.

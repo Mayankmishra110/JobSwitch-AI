@@ -34,7 +34,7 @@ jobswitch-ai/
 
 Each TS package has a strict, one-directional dependency order enforced by
 convention (no tooling), not by circular necessity:
-`core → db → ingest → apps/*`. `services/matcher` depends on nothing in the
+`core → db → ingest → apps/*`. `services/backend` depends on nothing in the
 TS side except a shared understanding of the Postgres schema — it is a
 separate Go module with its own `go.mod`.
 
@@ -47,9 +47,9 @@ and `docs/DEPLOYMENT.md` §2 for exact provisioning SQL.
 | Role | RLS? | Used by | Grants |
 |---|---|---|---|
 | owner (migration role) | Bypasses (table owner) | `pnpm migrate` only | DDL on everything |
-| `app_web` | Enforced | `apps/web`, `services/matcher/cmd/api` (session validation only) | Full CRUD on Layer 0/2, SELECT-only on Layer 1, column-restricted writes on `job_match`/`candidate_profile` |
+| `app_web` | Enforced | `apps/web`, `services/backend/cmd/api` (session validation only) | Full CRUD on Layer 0/2, SELECT-only on Layer 1, column-restricted writes on `job_match`/`candidate_profile` |
 | `app_ingest` | Enforced | `apps/worker`, `apps/scheduler` | Full CRUD on Layer 1 + `job_queue`. **Zero grant on any tenant table** — the one property with its own dedicated test (`packages/db/test/rls.test.ts`) |
-| `app_matcher` | **Bypasses** (`ALTER ROLE app_matcher BYPASSRLS`) | `services/matcher/cmd/worker` (not yet built) | SELECT on Layer 1 + profile tables, SELECT/INSERT/UPDATE on `job_queue`, full CRUD on `job_match`/`match_explanation` |
+| `app_matcher` | **Bypasses** (`ALTER ROLE app_matcher BYPASSRLS`) | `services/backend/cmd/worker` (not yet built) | SELECT on Layer 1 + profile tables, SELECT/INSERT/UPDATE on `job_queue`, full CRUD on `job_match`/`match_explanation` |
 
 **The one subtlety that has already caused a real bug** (see
 `specs/matching-pipeline.md`): `BYPASSRLS` is a role *attribute*, not a
@@ -61,7 +61,7 @@ explicit `ALTER ROLE ... BYPASSRLS`, in addition to the `GRANT`.
 
 ### Two pools in Go, never one
 
-`services/matcher/internal/db.Pools` holds `Web` (RLS-enforced,
+`services/backend/internal/db.Pools` holds `Web` (RLS-enforced,
 `WithAccount` sets `app.current_account_id` per transaction, mirrors
 `packages/db/src/context.ts` exactly) and `Matcher` (BYPASSRLS, used only
 by the batch worker's per-account loop, explicit `WHERE account_id = $1`

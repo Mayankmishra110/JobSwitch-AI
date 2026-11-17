@@ -9,7 +9,7 @@ import { hashToken } from '../src/repositories/identity.js';
  * risk integration point).
  *
  * This fixture is asserted by BOTH this suite and
- * services/matcher/internal/session's Go test. If they ever disagree, a
+ * services/backend/internal/session's Go test. If they ever disagree, a
  * session issued by apps/web silently fails - or worse, silently resolves
  * to the wrong account - when validated by the Go service. Regenerating the
  * fixture is fine; changing the hashing algorithm on either side without

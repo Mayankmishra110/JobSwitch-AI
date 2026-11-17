@@ -3,7 +3,7 @@
 This service is stateless and holds no database grant at all - it never
 even opens a Postgres connection. The one thing worth gating is who can
 spend LLM/embedding compute against it. When INTERNAL_TOKEN is configured
-(real deployment, called only from services/matcher and apps/tailor on
+(real deployment, called only from services/backend and apps/tailor on
 the internal network), every route requires it. Left unconfigured (local
 dev, no value set), the check is skipped entirely rather than locking a
 developer out with a token nobody set on purpose.

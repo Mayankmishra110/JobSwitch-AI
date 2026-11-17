@@ -1,11 +1,24 @@
 import {
   jobsRepo,
+  queueRepo,
   withoutTenantContext,
   type Pool,
   type Queryable,
 } from '@jobswitch/db';
 import { AdapterHttpError, AdapterShapeError, type AtsAdapter } from './adapter.js';
 import { linkNewPosting } from './grouping.js';
+
+/**
+ * Queue name services/backend's cmd/worker claims from
+ * (internal/worker/embed.go's EmbedJobVersionQueue) - the two sides never
+ * share code, so the string and the payload shape below are a cross-
+ * language contract enforced only by matching them exactly, not by a type.
+ */
+export const EMBED_JOB_VERSION_QUEUE = 'embed.job_version';
+
+export interface EmbedJobVersionPayload {
+  versionId: string;
+}
 
 /**
  * One ingestion run for one career source.
@@ -131,6 +144,21 @@ export async function runIngestion(options: RunOptions): Promise<RunOutcome> {
         if (upserted.outcome === 'created') created += 1;
         else if (upserted.outcome === 'updated') updated += 1;
         else if (upserted.outcome === 'reopened') reopened += 1;
+
+        // A new or changed version needs embedding for Stage 2 hybrid
+        // retrieval (specs/matching-pipeline.md). Enqueued inside this same
+        // transaction: if the run rolls back, no orphan job survives it.
+        // Dedup key is the version id itself - a version is immutable once
+        // written, so re-enqueueing the same one twice would only waste a
+        // worker cycle, never produce a wrong result, but the dedup key
+        // keeps a re-run within the same hour cheap.
+        if (upserted.versionCreated && upserted.versionId) {
+          await queueRepo.enqueue(tx, {
+            queue: EMBED_JOB_VERSION_QUEUE,
+            payload: { versionId: upserted.versionId } satisfies EmbedJobVersionPayload,
+            dedupKey: `${EMBED_JOB_VERSION_QUEUE}:${upserted.versionId}`,
+          });
+        }
 
         if (upserted.outcome === 'created') {
           await linkNewPosting(tx, {

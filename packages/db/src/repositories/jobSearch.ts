@@ -1,10 +1,13 @@
 import {
   AccountId,
+  EMBED_PROFILE_QUEUE,
+  type EmbedProfilePayload,
   type JobSearchSession,
   type JobSearchStopReason,
   type ResumeUpload,
 } from '@jobswitch/core';
 import type { Queryable } from '../context.js';
+import * as queueRepo from './queue.js';
 
 /**
  * Job search lifecycle and ephemeral resume retention (ADR D-31).
@@ -109,6 +112,17 @@ export async function startJobSearch(
   const resumeRow = resumeRows[0];
   if (!resumeRow) throw new Error('resume_upload upsert returned no row');
 
+  // The resume text just changed (or was set for the first time) - queue a
+  // re-embed. Cheap even when the text turns out unchanged: the handler
+  // reads resume_upload fresh at claim time (this payload carries no text
+  // of its own) and skips the actual AI call via profile_embedding's own
+  // source_hash column when nothing changed - see specs/matching-pipeline.md.
+  await queueRepo.enqueue(tx, {
+    queue: EMBED_PROFILE_QUEUE,
+    payload: { accountId, kind: 'resume' } satisfies EmbedProfilePayload,
+    dedupKey: `${EMBED_PROFILE_QUEUE}:${accountId}:resume`,
+  });
+
   if (existing) {
     return { session: existing, resume: toResumeUpload(resumeRow) };
   }
@@ -137,22 +151,26 @@ export async function startJobSearch(
  * not FK to job_match, it FKs to job_posting_version directly, so it needs
  * its own explicit delete, included below.
  *
- * NOT exhaustive against the full ADR yet - outreach_draft is also a purge
- * target once it exists (0012). This list, and the purge below, MUST be
- * extended in the same migration that creates it. That is a deliberate,
- * tracked gap, not an oversight: referencing a table before it exists would
- * break every migration before it.
+ * outreach_draft (0017) is in this list, per this comment's own original
+ * plan: a draft or sent message names a specific employer contact engaged
+ * with during this search, the same test job_application itself is named
+ * for. email_credential is deliberately NOT here - see 0017's own comment -
+ * linking a Gmail inbox is a standing, account-level connection, not
+ * something a specific search did, same reasoning that already keeps
+ * candidate_profile out of this array.
  *
- * profile_embedding is intentionally NOT here yet either, even though it is
- * keyed by account_id and clearly in scope (D-31 names it explicitly as a
- * purge target for the 'resume' kind) - wiring it is Phase 5.3 work, done
- * alongside the embedding worker that is the only thing that writes it.
- * Purging a column nothing populates yet would be a no-op dressed up as a
- * guarantee.
+ * profile_embedding is deliberately NOT in this array, even though its
+ * 'resume' kind is named explicitly as a purge target (D-31): every other
+ * entry here is a plain `DELETE FROM table WHERE account_id = $1`, but
+ * profile_embedding's 'desired_role' kind is derived from candidate_profile/
+ * profile_skill - retained data, not search activity - so a blanket
+ * whole-table delete would be wrong for this one table specifically. See
+ * the explicit kind-scoped DELETE right after this loop instead.
  */
 const PURGE_TABLES = [
   'resume_upload',
   'resume_source',
+  'outreach_draft',
   'resume_artifact',
   'job_application',
   'job_match',
@@ -189,7 +207,17 @@ export async function stopJobSearch(
     await tx.query(`DELETE FROM ${table} WHERE account_id = $1`, [accountId]);
   }
 
-  return { session: toSession(row), purgedTables: [...PURGE_TABLES] };
+  // Kind-scoped, unlike everything above: only the 'resume' embedding names
+  // search activity (a vector derived from resume_upload, which just got
+  // deleted). 'desired_role' is derived from candidate_profile/profile_skill
+  // - retained biography, not search content - and must survive this purge
+  // exactly like those tables do. Runs (and is reported below) the same way
+  // every PURGE_TABLES entry is, whether or not a row happened to exist.
+  await tx.query(`DELETE FROM profile_embedding WHERE account_id = $1 AND kind = 'resume'`, [
+    accountId,
+  ]);
+
+  return { session: toSession(row), purgedTables: [...PURGE_TABLES, 'profile_embedding'] };
 }
 
 /**

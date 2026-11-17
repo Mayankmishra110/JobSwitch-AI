@@ -37,17 +37,30 @@ def override_llm(fake: FakeLLM):
 
 
 def test_explain_returns_the_llms_explanation(client: TestClient) -> None:
+    # Graph B makes two calls per pass: draft_explanation, then
+    # self_critique - the fake must answer both, in order.
     fake = FakeLLM(
-        {
-            "summary": "Strong match on React experience and seniority.",
-            "evidence": [
-                {
-                    "claim": "4 years of React",
-                    "fact_ref": "resume:skill:react",
-                    "provenance": "verified_fact",
-                },
-            ],
-        }
+        responses=[
+            {
+                "summary": "Strong match on React experience and seniority.",
+                "evidence": [
+                    {
+                        "claim": "4 years of React",
+                        "fact_ref": "resume:skill:react",
+                        "provenance": "verified_fact",
+                    },
+                ],
+            },
+            {
+                "critiques": [
+                    {
+                        "claim": "4 years of React",
+                        "supported": True,
+                        "matching_fact_id": "resume:skill:react",
+                    },
+                ],
+            },
+        ]
     )
     override_llm(fake)
     try:
@@ -58,7 +71,7 @@ def test_explain_returns_the_llms_explanation(client: TestClient) -> None:
         assert len(body["evidence"]) == 1
         assert body["evidence"][0]["fact_ref"] == "resume:skill:react"
         assert body["model"] == "fake-model-v1"
-        assert body["prompt_version"] == 1
+        assert body["prompt_version"] == 2
     finally:
         app.dependency_overrides.clear()
 
@@ -68,24 +81,74 @@ def test_explain_provenance_gate_strips_evidence_citing_an_unknown_fact(
 ) -> None:
     """The actual D-22 enforcement test: the model hallucinates a fact_ref
     that was never in the request. This must be stripped, not passed
-    through to the candidate as if it were a grounded claim."""
+    through to the candidate as if it were a grounded claim.
+
+    A hallucinated ref counts as "unsupported claims" the same as a
+    failed self_critique verdict does (explain_graph.py's should_retry),
+    so this exercises the retry loop too, not just the gate in isolation -
+    round 1 drafts two claims (one hallucinated), gets retried, round 2
+    drafts cleanly. That is the graph actually doing what the plan asks:
+    "route back to draft_explanation carrying the specific failure,"
+    bounded by MAX_RETRIES.
+    """
     fake = FakeLLM(
-        {
-            "summary": "Great fit.",
-            "evidence": [
-                {
-                    "claim": "4 years of React",
-                    "fact_ref": "resume:skill:react",
-                    "provenance": "verified_fact",
-                },
-                # Hallucinated - not in REQUEST_BODY's facts at all.
-                {
-                    "claim": "Fluent in Rust",
-                    "fact_ref": "resume:skill:rust",
-                    "provenance": "verified_fact",
-                },
-            ],
-        }
+        responses=[
+            {
+                "summary": "Great fit.",
+                "evidence": [
+                    {
+                        "claim": "4 years of React",
+                        "fact_ref": "resume:skill:react",
+                        "provenance": "verified_fact",
+                    },
+                    # Hallucinated - not in REQUEST_BODY's facts at all.
+                    {
+                        "claim": "Fluent in Rust",
+                        "fact_ref": "resume:skill:rust",
+                        "provenance": "verified_fact",
+                    },
+                ],
+            },
+            {
+                # Both "supported" - the ref-existence check must strip the
+                # hallucinated one regardless of what self_critique says
+                # about it; a fact_ref that was never sent cannot become
+                # valid just because the model is confident about it.
+                "critiques": [
+                    {
+                        "claim": "4 years of React",
+                        "supported": True,
+                        "matching_fact_id": "resume:skill:react",
+                    },
+                    {
+                        "claim": "Fluent in Rust",
+                        "supported": True,
+                        "matching_fact_id": "resume:skill:rust",
+                    },
+                ],
+            },
+            {
+                # Retry round: the model "corrects" itself, citing only the
+                # real fact this time.
+                "summary": "Great fit.",
+                "evidence": [
+                    {
+                        "claim": "4 years of React",
+                        "fact_ref": "resume:skill:react",
+                        "provenance": "verified_fact",
+                    },
+                ],
+            },
+            {
+                "critiques": [
+                    {
+                        "claim": "4 years of React",
+                        "supported": True,
+                        "matching_fact_id": "resume:skill:react",
+                    },
+                ],
+            },
+        ]
     )
     override_llm(fake)
     try:
@@ -95,6 +158,7 @@ def test_explain_provenance_gate_strips_evidence_citing_an_unknown_fact(
         assert len(evidence) == 1
         assert evidence[0]["fact_ref"] == "resume:skill:react"
         assert all(e["fact_ref"] != "resume:skill:rust" for e in evidence)
+        assert len(fake.calls) == 4  # draft, critique, retry-draft, retry-critique
     finally:
         app.dependency_overrides.clear()
 
@@ -150,10 +214,14 @@ def test_explain_rejects_a_response_missing_the_required_summary_field(
 
 
 def test_explain_passes_the_facts_to_the_prompt(client: TestClient) -> None:
+    # No evidence -> self_critique short-circuits without a second LLM
+    # call (see explain_graph.py) - draft_explanation's prompt is the only
+    # call made, so last_user is still the right thing to check here.
     fake = FakeLLM({"summary": "ok", "evidence": []})
     override_llm(fake)
     try:
         client.post("/v1/match/explain", json=REQUEST_BODY)
+        assert len(fake.calls) == 1
         assert "resume:skill:react" in fake.last_user
         assert "Senior Frontend Engineer" in fake.last_user
     finally:

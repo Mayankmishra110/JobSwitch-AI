@@ -146,6 +146,30 @@ export async function createUserWithAccount(
   return { user, accountId };
 }
 
+/**
+ * The reverse of findPrimaryMembership: given an account, the earliest
+ * (owning) member's email - the address Phase 8's event-triggered
+ * notification mailer sends to. Deliberately the SAME "earliest
+ * membership" tie-break findPrimaryMembership already uses for the
+ * opposite direction, so the two never disagree about who "the" account
+ * owner is for an account with more than one member.
+ */
+export async function findAccountOwnerEmail(
+  tx: Queryable,
+  accountId: AccountId,
+): Promise<string | null> {
+  const { rows } = await tx.query<{ email: string }>(
+    `SELECT u.email
+     FROM account_member am
+     JOIN app_user u ON u.id = am.user_id AND u.deleted_at IS NULL
+     WHERE am.account_id = $1
+     ORDER BY am.created_at ASC
+     LIMIT 1`,
+    [accountId],
+  );
+  return rows[0]?.email ?? null;
+}
+
 export async function findPrimaryMembership(
   tx: Queryable,
   userId: UserId,

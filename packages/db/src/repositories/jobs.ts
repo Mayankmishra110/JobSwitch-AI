@@ -180,6 +180,8 @@ export interface UpsertResult {
   postingId: string;
   outcome: UpsertOutcome;
   versionCreated: boolean;
+  /** Set whenever versionCreated is true - the version to embed. */
+  versionId: string | null;
 }
 
 /**
@@ -275,6 +277,8 @@ export async function upsertPosting(
   const needsVersion =
     !existing || existing.current_fingerprint !== p.contentFingerprint;
 
+  let versionId: string | null = null;
+
   if (needsVersion) {
     const { rows } = await tx.query<{ id: string }>(
       `INSERT INTO job_posting_version
@@ -300,7 +304,7 @@ export async function upsertPosting(
     // DO NOTHING means this exact content was seen before - a posting that
     // reverted to an earlier wording. Point at the existing version rather
     // than writing a duplicate.
-    const versionId =
+    versionId =
       rows[0]?.id ??
       (
         await tx.query<{ id: string }>(
@@ -308,7 +312,8 @@ export async function upsertPosting(
            WHERE job_posting_id = $1 AND content_fingerprint = $2`,
           [postingId, p.contentFingerprint],
         )
-      ).rows[0]?.id;
+      ).rows[0]?.id ??
+      null;
 
     if (versionId) {
       await tx.query(
@@ -320,7 +325,7 @@ export async function upsertPosting(
 
   await replaceLocations(tx, postingId, p.locations);
 
-  return { postingId, outcome, versionCreated: needsVersion };
+  return { postingId, outcome, versionCreated: needsVersion, versionId };
 }
 
 async function replaceLocations(

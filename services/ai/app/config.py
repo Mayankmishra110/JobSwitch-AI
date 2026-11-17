@@ -18,11 +18,18 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # Bound to the internal compose/k8s network only in real deployment -
-    # apps/tailor and services/matcher would send this header. Optional so
+    # apps/tailor and services/backend would send this header. Optional so
     # local dev without it configured still works; production sets it.
     internal_token: str | None = None
 
     embedding_model: str = "BAAI/bge-small-en-v1.5"
+
+    # apps/tailor's own base URL - this service is stateless and holds no
+    # LaTeX toolchain itself, so Graph A (resume tailoring) calls out to it
+    # for parse/reinject/validate-nouns. Internal network only in real
+    # deployment; localhost default matches services/ai's own AI_SERVICE_URL
+    # convention for local dev.
+    tailor_service_url: str = "http://127.0.0.1:8200"
 
     # Provider waterfall, same order and same "first key wins" behavior as
     # Mayankbuilt's nipun pipeline (src/lib/resume/llm.ts) - kept

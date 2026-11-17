@@ -45,6 +45,7 @@ beforeAll(async () => {
 
   webPool = createPool({ connectionString: WEB_URL, max: 4 });
 
+  await ownerPool.query(`DELETE FROM job_queue WHERE queue = 'embed.profile'`);
   await ownerPool.query('DELETE FROM profile_experience');
   await ownerPool.query('DELETE FROM profile_skill');
   await ownerPool.query('DELETE FROM candidate_profile');
@@ -307,5 +308,44 @@ describe('profile repository behaviour', () => {
     await expect(
       withAccount(webPool, accountA, (tx) => profileRepo.addExperience(tx, accountA, invalid)),
     ).rejects.toThrow();
+  });
+});
+
+describe('embed.profile enqueue (kind desired_role)', () => {
+  async function enqueuedKinds(accountId: AccountId): Promise<string[]> {
+    const { rows } = await ownerPool.query<{ payload: { kind: string } }>(
+      `SELECT payload FROM job_queue WHERE queue = 'embed.profile' AND payload ->> 'accountId' = $1`,
+      [accountId],
+    );
+    return rows.map((r) => r.payload.kind);
+  }
+
+  it('upsertProfile enqueues desired_role, deduped across repeated writes', async () => {
+    const created = await withoutTenantContext(ownerPool, (tx) =>
+      identityRepo.createUserWithAccount(tx, { email: 'profile-embed-upsert@example.com', fullName: 'Embed Upsert' }),
+    );
+    const accountId = created.accountId;
+
+    await withAccount(webPool, accountId, (tx) =>
+      profileRepo.upsertProfile(tx, accountId, { currentTitle: 'Engineer' }),
+    );
+    await withAccount(webPool, accountId, (tx) =>
+      profileRepo.upsertProfile(tx, accountId, { currentTitle: 'Senior Engineer' }),
+    );
+
+    expect(await enqueuedKinds(accountId)).toEqual(['desired_role']);
+  });
+
+  it('replaceSkills enqueues desired_role', async () => {
+    const created = await withoutTenantContext(ownerPool, (tx) =>
+      identityRepo.createUserWithAccount(tx, { email: 'profile-embed-skills@example.com', fullName: 'Embed Skills' }),
+    );
+    const accountId = created.accountId;
+
+    await withAccount(webPool, accountId, (tx) =>
+      profileRepo.replaceSkills(tx, accountId, ['React', 'TypeScript']),
+    );
+
+    expect(await enqueuedKinds(accountId)).toEqual(['desired_role']);
   });
 });

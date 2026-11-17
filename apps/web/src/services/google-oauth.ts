@@ -1,6 +1,6 @@
-import { createHash, randomBytes } from 'node:crypto';
 import { Errors } from '@jobswitch/core';
 import type { Config } from '../config.js';
+import { generatePkce } from './pkce.js';
 
 /**
  * Google OAuth 2.0 with PKCE.
@@ -31,15 +31,10 @@ export interface GoogleProfile {
   fullName: string | null;
 }
 
-function base64UrlSha256(input: string): string {
-  return createHash('sha256').update(input).digest('base64url');
-}
-
 export function beginGoogleSignIn(config: Config): OauthStart {
   if (!config.google.enabled) throw Errors.oauthDisabled();
 
-  const state = randomBytes(24).toString('base64url');
-  const codeVerifier = randomBytes(48).toString('base64url');
+  const { state, codeVerifier, codeChallenge } = generatePkce();
 
   const url = new URL(AUTH_ENDPOINT);
   url.searchParams.set('client_id', config.google.clientId);
@@ -47,7 +42,7 @@ export function beginGoogleSignIn(config: Config): OauthStart {
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', 'openid email profile');
   url.searchParams.set('state', state);
-  url.searchParams.set('code_challenge', base64UrlSha256(codeVerifier));
+  url.searchParams.set('code_challenge', codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
   // Without this, a returning user who has already granted consent comes back
   // with no usable account selection prompt on shared machines.

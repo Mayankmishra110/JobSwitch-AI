@@ -8,6 +8,11 @@ export * as queueRepo from './repositories/queue.js';
 export * as jobsRepo from './repositories/jobs.js';
 export * as profileRepo from './repositories/profile.js';
 export * as jobSearchRepo from './repositories/jobSearch.js';
+export * as applicationsRepo from './repositories/applications.js';
+export * as artifactsRepo from './repositories/artifacts.js';
+export * as outreachRepo from './repositories/outreach.js';
+export * as matchesRepo from './repositories/matches.js';
+export * as emailCredentialRepo from './repositories/emailCredential.js';
 export type { QueueJob, EnqueueParams, QueueDepth } from './repositories/queue.js';
 export type {
   CareerSourceRow,

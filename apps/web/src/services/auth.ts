@@ -15,7 +15,10 @@ import {
   type Pool,
 } from '@jobswitch/db';
 import type { Config } from '../config.js';
+import type { AIClient } from './aiClient.js';
+import type { EventBus } from './events.js';
 import type { Mailer } from './mailer.js';
+import type { TailorHttpClient } from './tailorClient.js';
 import {
   equalizeTiming,
   hashPassword,
@@ -31,6 +34,9 @@ export interface AuthDeps {
   pool: Pool;
   config: Config;
   mailer: Mailer;
+  events: EventBus;
+  aiClient: AIClient;
+  tailorClient: TailorHttpClient;
 }
 
 export interface SignedInSession {

@@ -1,8 +1,11 @@
 # Embeddings and match explanation (`services/ai`)
 
 A stateless Python (FastAPI, managed with `uv`) service: real embeddings
-via `fastembed`, and a plain sequential LLM chain for match explanations.
-Built Phase 5.3. Holds no database grant of any kind — see
+via `fastembed`, resume tailoring and match explanations via LangGraph
+(Phase 5.4 — `specs/resume-tailoring.md`). Phase 5.3's plain sequential
+explain chain, built first as the documented working baseline, stays in
+the repo unchanged but no longer sits behind a live route. Holds no
+database grant of any kind — see
 `specs/architecture.md`'s boundary note; it never opens a Postgres
 connection, receives facts already tagged with their provenance (ADR
 D-22), and echoes back which it used.
@@ -15,7 +18,7 @@ Python was the deliberate choice for the ML/LLM half of this stack — the
 Python install, no `pip`/`venv` juggling) — `uv init`, `uv add`, `uv run`.
 Statelessness is a boundary decision, not an accident: keeping this
 service DB-free means it needs zero Postgres role, zero grant, zero RLS
-story — an entire class of security question that `services/matcher`
+story — an entire class of security question that `services/backend`
 (which does hold a database role) has to reason about, this service
 simply doesn't.
 
@@ -60,19 +63,25 @@ POST /v1/match/explain  { job: {title, company?, description}, facts: [{ref, tex
                        -> { summary, evidence: [{claim, fact_ref, provenance}], model, prompt_version }
 ```
 
-One LLM call (`app/explain_service.py`), then one deterministic filter —
-deliberately **not** the eventual LangGraph Graph B (no retry loop, no
-self-critique pass). The point of shipping this first, per the build plan,
-is to guarantee a working, cheaper baseline exists before the graph
-version becomes a deliberate, separately-explainable upgrade on top of it.
+**As of Phase 5.4, this route runs Graph B** (`app/graphs/explain_graph.py`
+— see `specs/resume-tailoring.md` for the full node-by-node writeup): a
+draft pass, a genuine second-pass self-critique, a provenance gate, and a
+bounded retry loop, with zero changes to this request/response contract.
+`app/explain_service.py` below describes Phase 5.3's original plain
+chain — one LLM call, then one deterministic filter, deliberately without
+a retry loop or self-critique pass — kept in the repo unchanged as the
+documented "here's the working baseline, here's what the graph adds"
+comparison point the build plan asked for, not as code any route still
+calls live.
 
 ### The provenance gate — D-22 enforced as code, not a prompt instruction
 
 The system prompt tells the model to cite only real facts by `ref` — and
 then `_provenance_gate()` **strips any evidence item citing a `fact_ref`
 that wasn't actually in the request**, regardless of what the prompt said.
-This is the same principle the eventual LangGraph graph's own
-`provenance_gate` node will apply; implemented as a plain function here
+This is the same principle Graph B's own `provenance_gate` node now
+applies for real (plus a second condition: `self_critique`'s verdict, not
+just ref-existence); implemented as a plain function here
 because Phase 5.3 has no graph to put a node in yet. Tested directly: a
 `FakeLLM` configured to hallucinate a `fact_ref` that was never sent has
 that evidence item silently dropped from the response, not surfaced as an
@@ -142,7 +151,7 @@ Left unconfigured (local dev), the check is skipped entirely rather than
 locking a developer out with a token nobody set on purpose. No route in
 this service is meant to be reachable from outside the internal network in
 a real deployment — see `specs/architecture.md`'s deployment-target note
-(`services/matcher` and `apps/tailor` would be the only callers).
+(`services/backend` and `apps/tailor` would be the only callers).
 
 ## Known gaps
 
@@ -150,13 +159,20 @@ a real deployment — see `specs/architecture.md`'s deployment-target note
   real risk (a cold pod depending on an outbound download succeeding) is
   unaddressed — this service has only ever run via `uv run uvicorn`
   locally.
-- **No LangGraph.** Both graphs (resume tailoring's Graph A, match
-  explanation's Graph B) are Phase 5.4 — this service has the plain
-  sequential chain only.
-- **`/v1/match/explain` is not wired to anything.** `services/matcher`
-  does not call it yet — no `explain.match` queue handler exists (see
-  `specs/matching-pipeline.md`'s own known-gaps list; `cmd/worker` itself
-  doesn't exist yet either).
+- **Closed: LangGraph is built (Phase 5.4)** — see
+  `specs/resume-tailoring.md`. Graph B now runs behind this same
+  `/v1/match/explain` route (`app/routers/explain.py` calls
+  `run_explain_graph`, zero request/response contract changes); the plain
+  chain below (`explain_service.py`) stays in the repo unchanged as the
+  documented baseline it was always meant to be compared against, not as
+  live code any route still calls. Graph A (resume tailoring) is a new
+  route, `POST /v1/tailor/resume`.
+- **Closed: `/v1/match/explain` is now wired.** `services/backend`'s
+  `cmd/worker` claims `explain.match` jobs (`internal/worker/explain.go`),
+  enqueued by `internal/match.RunForAccount` for the top 20 matches of
+  every run, and calls this exact endpoint for real — see
+  `specs/matching-pipeline.md`'s `explain.match` section for the full
+  loop, verified against a real Groq call through this same route.
 - **No streaming variant.** `/stream` endpoints (NDJSON per graph-node
   transition) are explicitly a phase-2 enhancement in the build plan,
   after the synchronous version works — which it now does, but streaming

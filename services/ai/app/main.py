@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from .embed import get_embedding_model, is_model_loaded
 from .routers.embed import router as embed_router
 from .routers.explain import router as explain_router
+from .routers.tailor import router as tailor_router
 
 
 @asynccontextmanager
@@ -37,6 +38,7 @@ app = FastAPI(title="jobswitch-ai", lifespan=lifespan)
 
 app.include_router(embed_router)
 app.include_router(explain_router)
+app.include_router(tailor_router)
 
 
 @app.get("/healthz")

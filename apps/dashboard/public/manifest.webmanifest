@@ -1,0 +1,12 @@
+{
+  "name": "JobSwitch AI",
+  "short_name": "JobSwitch",
+  "description": "Your job search, tracked end to end.",
+  "start_url": "/pipeline",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
